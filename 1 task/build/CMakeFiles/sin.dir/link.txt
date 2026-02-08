@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/sin.dir/1.cpp.o -o sin 

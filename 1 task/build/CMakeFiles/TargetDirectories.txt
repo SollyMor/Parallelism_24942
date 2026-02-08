@@ -1,0 +1,3 @@
+/home/soffa/Рабочий стол/Теория параллелизма/1 task/build/CMakeFiles/sin.dir
+/home/soffa/Рабочий стол/Теория параллелизма/1 task/build/CMakeFiles/edit_cache.dir
+/home/soffa/Рабочий стол/Теория параллелизма/1 task/build/CMakeFiles/rebuild_cache.dir
