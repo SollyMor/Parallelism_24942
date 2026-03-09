@@ -1,4 +1,4 @@
-# Install script for directory: /home/s.morozova/Parallelism_24942/1 task
+# Install script for directory: /home/s.morozova/Parallelism_24942/2 task/matrix
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -50,5 +50,5 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-file(WRITE "/home/s.morozova/Parallelism_24942/1 task/build/${CMAKE_INSTALL_MANIFEST}"
+file(WRITE "/home/s.morozova/Parallelism_24942/2 task/matrix/build/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")

@@ -8,7 +8,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/home/s.morozova/Parallelism_24942/1 task/1.cpp" "CMakeFiles/sin.dir/1.cpp.o" "gcc" "CMakeFiles/sin.dir/1.cpp.o.d"
+  "/home/s.morozova/Parallelism_24942/2 task/matrix/matrix_vector.cpp" "CMakeFiles/matrix_vector.dir/matrix_vector.cpp.o" "gcc" "CMakeFiles/matrix_vector.dir/matrix_vector.cpp.o.d"
   )
 
 # Targets to which this target links.

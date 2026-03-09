@@ -54,16 +54,16 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = "/home/s.morozova/Parallelism_24942/1 task"
+CMAKE_SOURCE_DIR = "/home/s.morozova/Parallelism_24942/2 task/matrix"
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = "/home/s.morozova/Parallelism_24942/1 task/build"
+CMAKE_BINARY_DIR = "/home/s.morozova/Parallelism_24942/2 task/matrix/build"
 
 #=============================================================================
 # Directory level rules for the build root directory
 
 # The main recursive "all" target.
-all: CMakeFiles/sin.dir/all
+all: CMakeFiles/matrix_vector.dir/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
@@ -71,34 +71,34 @@ preinstall:
 .PHONY : preinstall
 
 # The main recursive "clean" target.
-clean: CMakeFiles/sin.dir/clean
+clean: CMakeFiles/matrix_vector.dir/clean
 .PHONY : clean
 
 #=============================================================================
-# Target rules for target CMakeFiles/sin.dir
+# Target rules for target CMakeFiles/matrix_vector.dir
 
 # All Build rule for target.
-CMakeFiles/sin.dir/all:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sin.dir/build.make CMakeFiles/sin.dir/depend
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sin.dir/build.make CMakeFiles/sin.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir="/home/s.morozova/Parallelism_24942/1 task/build/CMakeFiles" --progress-num=1,2 "Built target sin"
-.PHONY : CMakeFiles/sin.dir/all
+CMakeFiles/matrix_vector.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/matrix_vector.dir/build.make CMakeFiles/matrix_vector.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/matrix_vector.dir/build.make CMakeFiles/matrix_vector.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir="/home/s.morozova/Parallelism_24942/2 task/matrix/build/CMakeFiles" --progress-num=1,2 "Built target matrix_vector"
+.PHONY : CMakeFiles/matrix_vector.dir/all
 
 # Build rule for subdir invocation for target.
-CMakeFiles/sin.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start "/home/s.morozova/Parallelism_24942/1 task/build/CMakeFiles" 2
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/sin.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start "/home/s.morozova/Parallelism_24942/1 task/build/CMakeFiles" 0
-.PHONY : CMakeFiles/sin.dir/rule
+CMakeFiles/matrix_vector.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start "/home/s.morozova/Parallelism_24942/2 task/matrix/build/CMakeFiles" 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/matrix_vector.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start "/home/s.morozova/Parallelism_24942/2 task/matrix/build/CMakeFiles" 0
+.PHONY : CMakeFiles/matrix_vector.dir/rule
 
 # Convenience name for target.
-sin: CMakeFiles/sin.dir/rule
-.PHONY : sin
+matrix_vector: CMakeFiles/matrix_vector.dir/rule
+.PHONY : matrix_vector
 
 # clean rule for target.
-CMakeFiles/sin.dir/clean:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sin.dir/build.make CMakeFiles/sin.dir/clean
-.PHONY : CMakeFiles/sin.dir/clean
+CMakeFiles/matrix_vector.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/matrix_vector.dir/build.make CMakeFiles/matrix_vector.dir/clean
+.PHONY : CMakeFiles/matrix_vector.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.

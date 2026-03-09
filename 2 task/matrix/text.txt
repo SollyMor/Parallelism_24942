@@ -1,0 +1,1 @@
+ g++ -O3 -fopenmp -march=native -o matrix_vector matrix_vector.cpp

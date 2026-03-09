@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = "/home/s.morozova/Parallelism_24942/1 task"
+CMAKE_SOURCE_DIR = "/home/s.morozova/Parallelism_24942/2 task/matrix"
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = "/home/s.morozova/Parallelism_24942/1 task/build"
+CMAKE_BINARY_DIR = "/home/s.morozova/Parallelism_24942/2 task/matrix/build"
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -87,9 +87,9 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start "/home/s.morozova/Parallelism_24942/1 task/build/CMakeFiles" "/home/s.morozova/Parallelism_24942/1 task/build//CMakeFiles/progress.marks"
+	$(CMAKE_COMMAND) -E cmake_progress_start "/home/s.morozova/Parallelism_24942/2 task/matrix/build/CMakeFiles" "/home/s.morozova/Parallelism_24942/2 task/matrix/build//CMakeFiles/progress.marks"
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start "/home/s.morozova/Parallelism_24942/1 task/build/CMakeFiles" 0
+	$(CMAKE_COMMAND) -E cmake_progress_start "/home/s.morozova/Parallelism_24942/2 task/matrix/build/CMakeFiles" 0
 .PHONY : all
 
 # The main clean target
@@ -117,41 +117,41 @@ depend:
 .PHONY : depend
 
 #=============================================================================
-# Target rules for targets named sin
+# Target rules for targets named matrix_vector
 
 # Build rule for target.
-sin: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 sin
-.PHONY : sin
+matrix_vector: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 matrix_vector
+.PHONY : matrix_vector
 
 # fast build rule for target.
-sin/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sin.dir/build.make CMakeFiles/sin.dir/build
-.PHONY : sin/fast
+matrix_vector/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/matrix_vector.dir/build.make CMakeFiles/matrix_vector.dir/build
+.PHONY : matrix_vector/fast
 
-1.o: 1.cpp.o
-.PHONY : 1.o
+matrix_vector.o: matrix_vector.cpp.o
+.PHONY : matrix_vector.o
 
 # target to build an object file
-1.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sin.dir/build.make CMakeFiles/sin.dir/1.cpp.o
-.PHONY : 1.cpp.o
+matrix_vector.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/matrix_vector.dir/build.make CMakeFiles/matrix_vector.dir/matrix_vector.cpp.o
+.PHONY : matrix_vector.cpp.o
 
-1.i: 1.cpp.i
-.PHONY : 1.i
+matrix_vector.i: matrix_vector.cpp.i
+.PHONY : matrix_vector.i
 
 # target to preprocess a source file
-1.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sin.dir/build.make CMakeFiles/sin.dir/1.cpp.i
-.PHONY : 1.cpp.i
+matrix_vector.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/matrix_vector.dir/build.make CMakeFiles/matrix_vector.dir/matrix_vector.cpp.i
+.PHONY : matrix_vector.cpp.i
 
-1.s: 1.cpp.s
-.PHONY : 1.s
+matrix_vector.s: matrix_vector.cpp.s
+.PHONY : matrix_vector.s
 
 # target to generate assembly for a file
-1.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/sin.dir/build.make CMakeFiles/sin.dir/1.cpp.s
-.PHONY : 1.cpp.s
+matrix_vector.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/matrix_vector.dir/build.make CMakeFiles/matrix_vector.dir/matrix_vector.cpp.s
+.PHONY : matrix_vector.cpp.s
 
 # Help Target
 help:
@@ -161,10 +161,10 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
-	@echo "... sin"
-	@echo "... 1.o"
-	@echo "... 1.i"
-	@echo "... 1.s"
+	@echo "... matrix_vector"
+	@echo "... matrix_vector.o"
+	@echo "... matrix_vector.i"
+	@echo "... matrix_vector.s"
 .PHONY : help
 
 
