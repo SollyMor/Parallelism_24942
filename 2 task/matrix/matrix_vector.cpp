@@ -8,13 +8,10 @@
 #include <numeric>
 #include <iomanip>
 
-using namespace std;
-using namespace std::chrono;
-
 // Получение информации о системе
 void print_system_info()
 {
-  cout << "\n=== Информация о вычислительном узле ===\n";
+  std::cout << "\n=== Информация о вычислительном узле ===\n";
 
   system("lscpu | grep 'Model name'");
   system("lscpu | grep 'CPU(s)' | head -1");
@@ -27,7 +24,7 @@ void print_system_info()
 
   system("cat /etc/os-release | grep 'PRETTY_NAME' | cut -d'=' -f2 | tr -d '\"' 2>/dev/null");
 
-  cout << "=====================================\n\n";
+  std::cout << "=====================================\n\n";
 }
 
 // Параллельная инициализация матрицы
@@ -98,9 +95,9 @@ double run_benchmark(size_t size, int num_threads, bool parallel_init = true)
     vector = new double[cols];
     result = new double[rows];
   }
-  catch (const bad_alloc &e)
+  catch (const std::bad_alloc &e)
   {
-    cerr << "Ошибка выделения памяти для размера " << size << endl;
+    std::cerr << "Ошибка выделения памяти для размера " << size << std::endl;
     delete[] matrix;
     delete[] vector;
     delete[] result;
@@ -131,7 +128,7 @@ double run_benchmark(size_t size, int num_threads, bool parallel_init = true)
     omp_set_num_threads(num_threads);
   }
 
-  auto start = high_resolution_clock::now();
+  auto start = std::chrono::high_resolution_clock::now();
 
   if (num_threads == 0)
   {
@@ -142,9 +139,9 @@ double run_benchmark(size_t size, int num_threads, bool parallel_init = true)
     matrix_vector_mult_parallel(matrix, vector, result, rows, cols);
   }
 
-  auto end = high_resolution_clock::now();
+  auto end = std::chrono::high_resolution_clock::now();
 
-  duration<double> elapsed = end - start;
+  std::chrono::duration<double> elapsed = end - start;
   double seconds = elapsed.count();
 
   delete[] matrix;
@@ -157,7 +154,7 @@ double run_benchmark(size_t size, int num_threads, bool parallel_init = true)
 // Функция для многократного замера с усреднением
 double run_benchmark_averaged(size_t size, int num_threads, bool parallel_init = true, int num_runs = 5)
 {
-  vector<double> times;
+  std::vector<double> times;
 
   for (int run = 0; run < num_runs; run++)
   {
@@ -167,7 +164,7 @@ double run_benchmark_averaged(size_t size, int num_threads, bool parallel_init =
     times.push_back(time);
   }
 
-  sort(times.begin(), times.end());
+  std::sort(times.begin(), times.end());
   double sum = 0;
   for (int i = 1; i < num_runs - 1; i++)
   {
@@ -178,30 +175,30 @@ double run_benchmark_averaged(size_t size, int num_threads, bool parallel_init =
 }
 
 // Упрощенная функция - только через переменные окружения
-void set_binding_policy(const string &policy)
+void set_binding_policy(const std::string &policy)
 {
   if (policy == "close")
   {
     setenv("OMP_PROC_BIND", "close", 1);
     setenv("OMP_PLACES", "cores", 1);
-    cout << "  Установлена политика: CLOSE (потоки привязаны к ближайшим ядрам)\n";
+    std::cout << "  Установлена политика: CLOSE (потоки привязаны к ближайшим ядрам)\n";
   }
   else if (policy == "spread")
   {
     setenv("OMP_PROC_BIND", "spread", 1);
     setenv("OMP_PLACES", "cores", 1);
-    cout << "  Установлена политика: SPREAD (потоки распределены по всем ядрам)\n";
+    std::cout << "  Установлена политика: SPREAD (потоки распределены по всем ядрам)\n";
   }
   else if (policy == "master")
   {
     setenv("OMP_PROC_BIND", "master", 1);
     setenv("OMP_PLACES", "cores", 1);
-    cout << "  Установлена политика: MASTER (все потоки на одном ядре с мастером)\n";
+    std::cout << "  Установлена политика: MASTER (все потоки на одном ядре с мастером)\n";
   }
   else
   {
     setenv("OMP_PROC_BIND", "false", 1);
-    cout << "  Установлена политика: NO BIND (без привязки)\n";
+    std::cout << "  Установлена политика: NO BIND (без привязки)\n";
   }
 }
 
@@ -214,21 +211,21 @@ int main()
   const int num_threads[] = {2, 4, 7, 8, 16, 20, 40};
   const int num_threads_count = sizeof(num_threads) / sizeof(num_threads[0]);
 
-  const vector<string> binding_policies = {"none", "close", "spread"};
-  const string policy_names[] = {"Без привязки", "Close binding", "Spread binding"};
+  const std::vector<std::string> binding_policies = {"none", "close", "spread"};
+  const std::string policy_names[] = {"Без привязки", "Close binding", "Spread binding"};
 
   const int NUM_RUNS = 5;
 
-  cout << "\n=========== ТЕСТИРОВАНИЕ С РАЗНЫМИ ПОЛИТИКАМИ ПРИВЯЗКИ ===========\n";
-  cout << "Каждое значение усреднено по " << NUM_RUNS << " замерам (с отбрасыванием мин/макс)\n\n";
+  std::cout << "\n=========== ТЕСТИРОВАНИЕ С РАЗНЫМИ ПОЛИТИКАМИ ПРИВЯЗКИ ===========\n";
+  std::cout << "Каждое значение усреднено по " << NUM_RUNS << " замерам (с отбрасыванием мин/макс)\n\n";
 
   for (size_t policy_idx = 0; policy_idx < binding_policies.size(); policy_idx++)
   {
-    string policy = binding_policies[policy_idx];
+    std::string policy = binding_policies[policy_idx];
 
-    cout << "\n----------------------------------------------------------------\n";
-    cout << "ПОЛИТИКА: " << policy_names[policy_idx] << "\n";
-    cout << "----------------------------------------------------------------\n";
+    std::cout << "\n----------------------------------------------------------------\n";
+    std::cout << "ПОЛИТИКА: " << policy_names[policy_idx] << "\n";
+    std::cout << "----------------------------------------------------------------\n";
 
     set_binding_policy(policy);
 
@@ -236,17 +233,17 @@ int main()
     {
       size_t size = sizes[s];
 
-      cout << "\n"
-           << size_labels[s] << ":\n";
-      cout << "------------------------------------------------\n";
+      std::cout << "\n"
+                << size_labels[s] << ":\n";
+      std::cout << "------------------------------------------------\n";
 
       double T1 = run_benchmark_averaged(size, 0, false, NUM_RUNS);
       if (T1 < 0)
         continue;
 
-      cout << "T1 (avg) = " << fixed << setprecision(6) << T1 << " s\n";
-      cout << "Потоки | Время (с) avg | Ускорение\n";
-      cout << "----------------------------------------\n";
+      std::cout << "T1 (avg) = " << std::fixed << std::setprecision(6) << T1 << " s\n";
+      std::cout << "Потоки | Время (с) avg | Ускорение\n";
+      std::cout << "----------------------------------------\n";
 
       for (int t = 0; t < num_threads_count; t++)
       {
@@ -262,9 +259,9 @@ int main()
     }
   }
 
-  cout << "\n================================================\n";
-  cout << "* Close binding - потоки привязаны к ближайшим ядрам\n";
-  cout << "* Spread binding - потоки распределены по всем доступным ядрам\n";
+  std::cout << "\n================================================\n";
+  std::cout << "* Close binding - потоки привязаны к ближайшим ядрам\n";
+  std::cout << "* Spread binding - потоки распределены по всем доступным ядрам\n";
 
   return 0;
 }

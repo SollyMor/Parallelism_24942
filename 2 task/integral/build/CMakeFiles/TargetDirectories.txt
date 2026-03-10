@@ -1,0 +1,3 @@
+/home/s.morozova/Parallelism_24942/2 task/integral/build/CMakeFiles/integral.dir
+/home/s.morozova/Parallelism_24942/2 task/integral/build/CMakeFiles/edit_cache.dir
+/home/s.morozova/Parallelism_24942/2 task/integral/build/CMakeFiles/rebuild_cache.dir

@@ -1,0 +1,3 @@
+/home/s.morozova/Parallelism_24942/2 task/itteration/build/CMakeFiles/itteration.dir
+/home/s.morozova/Parallelism_24942/2 task/itteration/build/CMakeFiles/edit_cache.dir
+/home/s.morozova/Parallelism_24942/2 task/itteration/build/CMakeFiles/rebuild_cache.dir
