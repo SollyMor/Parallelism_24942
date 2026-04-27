@@ -1,536 +1,378 @@
-#include <iostream>
-#include <vector>
 #include <cmath>
-#include <omp.h>
 #include <chrono>
+#include <fstream>
+#include <iostream>
 #include <iomanip>
-#include <cstdlib>
+#include <omp.h>
+#include <vector>
+#include <algorithm>
 #include <string>
+#include <cstdlib>
+#include <numeric>
 
-// Получение информации о системе
+const double EPSILON = 1e-13;
+const double TAU = -1e-5;
+const int N = 7100;
+const int NUM_RUNS = 5;
+
 void print_system_info()
 {
-  std::cout << "\n=== Информация о вычислительном узле ===\n";
-
-  system("lscpu | grep 'Model name'");
-  system("lscpu | grep 'CPU(s)' | head -1");
-  system("lscpu | grep 'NUMA'");
-
-  system("cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo 'N/A'");
-
-  system("numactl --hardware | grep 'available' 2>/dev/null || echo 'NUMA info not available'");
-  system("numactl --hardware | grep 'size' 2>/dev/null");
-
-  system("cat /etc/os-release | grep 'PRETTY_NAME' | cut -d'=' -f2 | tr -d '\"' 2>/dev/null");
-
-  std::cout << "=====================================\n\n";
+    std::cout << "\n=== Информация о вычислительном узле ===\n";
+    system("lscpu | grep 'Model name'");
+    system("lscpu | grep 'CPU(s)' | head -1");
+    system("lscpu | grep 'NUMA'");
+    system("cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo 'N/A'");
+    system("numactl --hardware | grep 'available' 2>/dev/null || echo 'NUMA info not available'");
+    system("numactl --hardware | grep 'size' 2>/dev/null");
+    system("cat /etc/os-release | grep 'PRETTY_NAME' | cut -d'=' -f2 | tr -d '\"' 2>/dev/null");
+    std::cout << "=====================================\n\n";
 }
 
-// Вспомогательная функция для форматирования вектора
-template <typename T>
-std::string vector_to_string(const std::vector<T> &v)
+void init_system(std::vector<double> &a, std::vector<double> &b, std::vector<double> &x, size_t n)
 {
-  std::string result = "[";
-  for (size_t i = 0; i < v.size(); i++)
-  {
-    if (i > 0)
-      result += ", ";
-    result += std::to_string(v[i]);
-  }
-  result += "]";
-  return result;
+    for (size_t i = 0; i < n; i++)
+    {
+        for (size_t j = 0; j < n; j++)
+        {
+            a[i * n + j] = 1.0 + (i == j ? 1.0 : 0.0);
+        }
+        b[i] = static_cast<double>(n + 1);
+        x[i] = 0.0;
+    }
 }
 
-// Класс для решения СЛАУ методом простой итерации
-class SimpleIterationSolver
+void solve_serial(const std::vector<double> &a, const std::vector<double> &b,
+                  std::vector<double> &x, size_t n, int /*num_threads*/)
 {
-private:
-  int N;
-  std::vector<std::vector<double>> A;
-  std::vector<double> b;
-  std::vector<double> x;
-  double epsilon;
-  int max_iter;
+    std::vector<double> diff(n);
+    double b_len_sq = 0.0;
+    double dev = 0.0;
 
-public:
-  SimpleIterationSolver(int size, double eps = 1e-10, int max_it = 10000)
-      : N(size), epsilon(eps), max_iter(max_it)
-  {
-    std::cout << "Инициализация матрицы " << N << "x" << N << "...\n";
-
-    // Инициализация матрицы A: диагональ = 2.0, остальное = 1.0
-    A.resize(N, std::vector<double>(N, 1.0));
-    for (int i = 0; i < N; i++)
+    for (size_t i = 0; i < n; i++)
     {
-      A[i][i] = 2.0;
+        b_len_sq += b[i] * b[i];
+        diff[i] = 0.0;
+    }
+    dev = b_len_sq;
+
+    while (std::sqrt(dev / b_len_sq) >= EPSILON)
+    {
+        dev = 0.0;
+        for (size_t i = 0; i < n; ++i)
+        {
+            x[i] = x[i] - TAU * diff[i];
+        }
+        for (size_t i = 0; i < n; ++i)
+        {
+            double sum_ax = 0.0;
+            for (size_t j = 0; j < n; ++j)
+                sum_ax += a[i * n + j] * x[j];
+            diff[i] = b[i] - sum_ax;
+            dev += diff[i] * diff[i];
+        }
+    }
+}
+
+void solve_parallel_1(const std::vector<double> &a, const std::vector<double> &b,
+                      std::vector<double> &x, size_t n, int num_threads)
+{
+    std::vector<double> diff(n);
+    double b_len_sq = 0.0;
+    double dev = 0.0;
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        b_len_sq += b[i] * b[i];
+        diff[i] = 0.0;
+    }
+    dev = b_len_sq;
+
+    while (std::sqrt(dev / b_len_sq) >= EPSILON)
+    {
+        dev = 0.0;
+#pragma omp parallel for num_threads(num_threads)
+        for (size_t i = 0; i < n; ++i)
+        {
+            x[i] = x[i] - TAU * diff[i];
+        }
+#pragma omp parallel for num_threads(num_threads) reduction(+ : dev)
+        for (size_t i = 0; i < n; ++i)
+        {
+            double sum_ax = 0.0;
+            for (size_t j = 0; j < n; ++j)
+                sum_ax += a[i * n + j] * x[j];
+            diff[i] = b[i] - sum_ax;
+            dev += diff[i] * diff[i];
+        }
+    }
+}
+
+void solve_parallel_2(const std::vector<double> &a, const std::vector<double> &b,
+                      std::vector<double> &x, size_t n, int num_threads)
+{
+    std::vector<double> diff(n);
+    double b_len_sq = 0.0;
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        b_len_sq += b[i] * b[i];
+        diff[i] = 0.0;
     }
 
-    // Инициализация вектора b: все элементы = N+1
-    b.resize(N, N + 1.0);
+    double dev = 0.0;
+    bool stop = false;
 
-    // Начальное приближение x: все элементы = 0
-    x.resize(N, 0.0);
-
-    std::cout << "Инициализация завершена\n";
-  }
-
-  // Последовательная версия
-  double solve_serial()
-  {
-    std::vector<double> x_new(N, 0.0);
-    double norm_diff;
-    int iter = 0;
-
-    auto start = std::chrono::high_resolution_clock::now();
-
-    do
+#pragma omp parallel num_threads(num_threads) shared(a, b, x, diff, dev, stop) firstprivate(b_len_sq)
     {
-      // Вычисление нового приближения
-      for (int i = 0; i < N; i++)
-      {
-        double sum = 0.0;
-        for (int j = 0; j < N; j++)
+        while (!stop)
         {
-          if (j != i)
-          {
-            sum += A[i][j] * x[j];
-          }
-        }
-        x_new[i] = (b[i] - sum) / A[i][i];
-      }
-
-      // Вычисление нормы разности
-      norm_diff = 0.0;
-      for (int i = 0; i < N; i++)
-      {
-        double diff = x_new[i] - x[i];
-        norm_diff += diff * diff;
-      }
-      norm_diff = std::sqrt(norm_diff);
-
-      // Обновление решения
-      x = x_new;
-      iter++;
-
-    } while (norm_diff > epsilon && iter < max_iter);
-
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-
-    std::cout << "Последовательная версия: " << iter << " итераций, норма невязки: " << norm_diff << std::endl;
-
-    return elapsed.count();
-  }
-
-  // Вариант 1: отдельные параллельные секции для каждого цикла
-  double solve_parallel_v1(int num_threads)
-  {
-    omp_set_num_threads(num_threads);
-
-    std::vector<double> x_new(N, 0.0);
-    double norm_diff;
-    int iter = 0;
-
-    auto start = std::chrono::high_resolution_clock::now();
-
-    do
-    {
-// Параллельное вычисление нового приближения
-#pragma omp parallel for
-      for (int i = 0; i < N; i++)
-      {
-        double sum = 0.0;
-        for (int j = 0; j < N; j++)
-        {
-          if (j != i)
-          {
-            sum += A[i][j] * x[j];
-          }
-        }
-        x_new[i] = (b[i] - sum) / A[i][i];
-      }
-
-      // Параллельное вычисление нормы
-      double sum_sq = 0.0;
-#pragma omp parallel for reduction(+ : sum_sq)
-      for (int i = 0; i < N; i++)
-      {
-        double diff = x_new[i] - x[i];
-        sum_sq += diff * diff;
-      }
-      norm_diff = std::sqrt(sum_sq);
-
-      // Обновление решения (последовательно)
-      x = x_new;
-      iter++;
-
-    } while (norm_diff > epsilon && iter < max_iter);
-
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-
-    if (num_threads == 1)
-    {
-      std::cout << "Вариант 1: " << iter << " итераций, норма невязки: " << norm_diff << std::endl;
-    }
-
-    return elapsed.count();
-  }
-
-  // Вариант 2: одна параллельная секция на весь итерационный процесс
-  double solve_parallel_v2(int num_threads)
-  {
-    omp_set_num_threads(num_threads);
-
-    std::vector<double> x_new(N, 0.0);
-    double norm_diff;
-    int iter = 0;
-
-    auto start = std::chrono::high_resolution_clock::now();
-
-#pragma omp parallel
-    {
-      do
-      {
-// Вычисление нового приближения
-#pragma omp for
-        for (int i = 0; i < N; i++)
-        {
-          double sum = 0.0;
-          for (int j = 0; j < N; j++)
-          {
-            if (j != i)
+#pragma omp single
             {
-              sum += A[i][j] * x[j];
+                dev = 0.0;
             }
-          }
-          x_new[i] = (b[i] - sum) / A[i][i];
-        }
-
-        // Вычисление нормы
-        double local_sum = 0.0;
-#pragma omp for reduction(+ : local_sum)
-        for (int i = 0; i < N; i++)
-        {
-          double diff = x_new[i] - x[i];
-          local_sum += diff * diff;
-        }
-
+#pragma omp for schedule(runtime)
+            for (size_t i = 0; i < n; ++i)
+            {
+                x[i] = x[i] - TAU * diff[i];
+            }
+#pragma omp for schedule(runtime) reduction(+ : dev)
+            for (size_t i = 0; i < n; ++i)
+            {
+                double sum_ax = 0.0;
+                for (size_t j = 0; j < n; ++j)
+                {
+                    sum_ax += a[i * n + j] * x[j];
+                }
+                diff[i] = b[i] - sum_ax;
+                dev += diff[i] * diff[i];
+            }
 #pragma omp single
-        {
-          norm_diff = std::sqrt(local_sum);
-        }
-
-// Обновление решения
-#pragma omp single
-        {
-          x = x_new;
-          iter++;
-        }
-
+            {
+                stop = (std::sqrt(dev / b_len_sq) < EPSILON);
+            }
 #pragma omp barrier
-
-      } while (norm_diff > epsilon && iter < max_iter);
+        }
     }
-
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-
-    if (num_threads == 1)
-    {
-      std::cout << "Вариант 2: " << iter << " итераций, норма невязки: " << norm_diff << std::endl;
-    }
-
-    return elapsed.count();
-  }
-
-  // Исследование schedule
-  void test_schedule(int num_threads, int schedule_type, int chunk_size = 0)
-  {
-    omp_set_num_threads(num_threads);
-
-    std::vector<double> x_new(N, 0.0);
-    double norm_diff;
-    int iter = 0;
-    std::vector<double> x_copy = x;
-
-    auto start = std::chrono::high_resolution_clock::now();
-
-    do
-    {
-      // Выбор типа schedule
-      if (schedule_type == 0)
-      { // static
-#pragma omp parallel for schedule(static, chunk_size)
-        for (int i = 0; i < N; i++)
-        {
-          double sum = 0.0;
-          for (int j = 0; j < N; j++)
-          {
-            if (j != i)
-            {
-              sum += A[i][j] * x_copy[j];
-            }
-          }
-          x_new[i] = (b[i] - sum) / A[i][i];
-        }
-      }
-      else if (schedule_type == 1)
-      { // dynamic
-#pragma omp parallel for schedule(dynamic, chunk_size)
-        for (int i = 0; i < N; i++)
-        {
-          double sum = 0.0;
-          for (int j = 0; j < N; j++)
-          {
-            if (j != i)
-            {
-              sum += A[i][j] * x_copy[j];
-            }
-          }
-          x_new[i] = (b[i] - sum) / A[i][i];
-        }
-      }
-      else
-      { // guided
-#pragma omp parallel for schedule(guided, chunk_size)
-        for (int i = 0; i < N; i++)
-        {
-          double sum = 0.0;
-          for (int j = 0; j < N; j++)
-          {
-            if (j != i)
-            {
-              sum += A[i][j] * x_copy[j];
-            }
-          }
-          x_new[i] = (b[i] - sum) / A[i][i];
-        }
-      }
-
-      // Вычисление нормы
-      double sum_sq = 0.0;
-#pragma omp parallel for reduction(+ : sum_sq)
-      for (int i = 0; i < N; i++)
-      {
-        double diff = x_new[i] - x_copy[i];
-        sum_sq += diff * diff;
-      }
-      norm_diff = std::sqrt(sum_sq);
-
-      x_copy = x_new;
-      iter++;
-
-    } while (norm_diff > epsilon && iter < max_iter);
-
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-
-    std::string schedule_name;
-    if (schedule_type == 0)
-      schedule_name = "static";
-    else if (schedule_type == 1)
-      schedule_name = "dynamic";
-    else
-      schedule_name = "guided";
-
-    std::cout << "schedule(" << schedule_name << ", " << (chunk_size > 0 ? std::to_string(chunk_size) : "default")
-              << "): " << elapsed.count() << " с, " << iter << " итераций\n";
-  }
-
-  // Сброс решения к начальному приближению
-  void reset()
-  {
-    x.assign(N, 0.0);
-  }
-};
-
-// Функция для замера времени с усреднением для solve_parallel_v1
-double run_benchmark_v1(SimpleIterationSolver &solver, int num_threads, int num_runs = 2)
-{
-  std::vector<double> times;
-
-  for (int run = 0; run < num_runs; run++)
-  {
-    solver.reset();
-    double time = solver.solve_parallel_v1(num_threads);
-    times.push_back(time);
-  }
-
-  // Усредняем
-  double sum = 0;
-  for (double t : times)
-  {
-    sum += t;
-  }
-
-  return sum / num_runs;
 }
 
-// Функция для замера времени с усреднением для solve_parallel_v2
-double run_benchmark_v2(SimpleIterationSolver &solver, int num_threads, int num_runs = 2)
+double run_single_measurement(void (*solve)(const std::vector<double> &, const std::vector<double> &,
+                                            std::vector<double> &, size_t, int),
+                              size_t n, int num_threads)
 {
-  std::vector<double> times;
+    std::vector<double> a(n * n);
+    std::vector<double> b(n);
+    std::vector<double> x(n);
+    init_system(a, b, x, n);
 
-  for (int run = 0; run < num_runs; run++)
-  {
-    solver.reset();
-    double time = solver.solve_parallel_v2(num_threads);
-    times.push_back(time);
-  }
+    auto start = std::chrono::steady_clock::now();
+    solve(a, b, x, n, num_threads);
+    auto end = std::chrono::steady_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
 
-  // Усредняем
-  double sum = 0;
-  for (double t : times)
-  {
-    sum += t;
-  }
+    return elapsed.count();
+}
 
-  return sum / num_runs;
+double run_benchmark_averaged(void (*solve)(const std::vector<double> &, const std::vector<double> &,
+                                            std::vector<double> &, size_t, int),
+                              size_t n, int num_threads, int num_runs = NUM_RUNS)
+{
+    double sum = 0.0;
+
+    for (int run = 0; run < num_runs; run++)
+    {
+        double time = run_single_measurement(solve, n, num_threads);
+        sum += time;
+    }
+
+    return sum / num_runs;
 }
 
 int main()
 {
-  print_system_info();
+    print_system_info();
 
-  int N = 5000; // Увеличил размер для более реалистичного теста
-  double epsilon = 1e-6;
+    std::cout << std::fixed << std::setprecision(6);
+    std::cout << "\n=== РЕШЕНИЕ СЛАУ МЕТОДОМ ПРОСТЫХ ИТЕРАЦИЙ ===\n";
+    std::cout << "Размер матрицы: " << N << "×" << N << "\n";
+    std::cout << "Точность: " << EPSILON << "\n";
+    std::cout << "Количество запусков: " << NUM_RUNS << " (простое среднее)\n";
 
-  std::cout << std::fixed << std::setprecision(6);
-  std::cout << "\n=== РЕШЕНИЕ СЛАУ МЕТОДОМ ПРОСТОЙ ИТЕРАЦИИ ===\n";
-  std::cout << "Размер системы: " << N << "x" << N << std::endl;
-  std::cout << "Точность: " << epsilon << std::endl;
+    const std::vector<int> num_threads = {1, 2, 4, 7, 8, 16, 20, 40};
+    const int num_threads_count = num_threads.size();
 
-  SimpleIterationSolver solver(N, epsilon);
+    std::cout << "\n=== ФАЗА 1: СРАВНЕНИЕ АЛГОРИТМОВ ===\n";
 
-  std::vector<int> num_threads = {1, 2, 4, 8, 16};
-  int max_threads = omp_get_max_threads();
-  std::cout << "Максимальное доступное количество потоков: " << max_threads << std::endl;
+    std::cout << "\nПараллельные алгоритмы:\n";
+    std::cout << std::string(100, '-') << "\n";
+    printf("%8s | %15s | %15s | %15s | %12s | %12s\n",
+           "Потоки", "T1 (с)", "Время 1 (с)", "Время 2 (с)", "Ускор 1", "Ускор 2");
+    std::cout << std::string(100, '-') << "\n";
 
-  std::vector<int> available_threads;
-  for (int t : num_threads)
-  {
-    if (t <= max_threads)
+    std::vector<double> times1, times2, speedups1, speedups2;
+
+    for (int threads : num_threads)
     {
-      available_threads.push_back(t);
+        double T1 = run_benchmark_averaged(solve_serial, N, 1, NUM_RUNS);
+        double time1 = run_benchmark_averaged(solve_parallel_1, N, threads, NUM_RUNS);
+        double time2 = run_benchmark_averaged(solve_parallel_2, N, threads, NUM_RUNS);
+
+        double speedup1 = T1 / time1;
+        double speedup2 = T1 / time2;
+
+        times1.push_back(time1);
+        times2.push_back(time2);
+        speedups1.push_back(speedup1);
+        speedups2.push_back(speedup2);
+
+        printf("%8d | %15.6f | %15.6f | %15.6f | %12.4f | %12.4f\n",
+               threads, T1, time1, time2, speedup1, speedup2);
     }
-  }
 
-  if (available_threads.empty())
-  {
-    available_threads.push_back(1);
-  }
+    std::cout << "\n=== ФАЗА 2: ИССЛЕДОВАНИЕ РАСПИСАНИЙ (SCHEDULE) ===\n";
+    std::cout << "Используется алгоритм 2 с " << num_threads[4] << " потоками\n\n";
 
-  std::cout << "\n========================================\n";
-  std::cout << "ИССЛЕДОВАНИЕ ПРОИЗВОДИТЕЛЬНОСТИ\n";
-  std::cout << "========================================\n";
-
-  std::cout << "\nПоследовательная версия:\n";
-  solver.reset();
-  double T1 = solver.solve_serial();
-  std::cout << "Время: " << T1 << " с\n";
-
-  std::cout << "\n"
-            << std::string(100, '=') << std::endl;
-  std::cout << "Потоки | Вариант 1 (время) | Ускорение | Вариант 2 (время) | Ускорение | Эффективность V2" << std::endl;
-  std::cout << std::string(100, '-') << std::endl;
-
-  std::vector<double> times_v1, times_v2, speedups_v1, speedups_v2;
-
-  for (int threads : available_threads)
-  {
-    std::cout << "\nТестирование с " << threads << " потоками..." << std::endl;
-
-    double t_v1 = run_benchmark_v1(solver, threads, 2);
-    double s_v1 = T1 / t_v1;
-
-    double t_v2 = run_benchmark_v2(solver, threads, 2);
-    double s_v2 = T1 / t_v2;
-    double eff_v2 = s_v2 / threads * 100;
-
-    std::cout << std::setw(4) << threads << "    | "
-              << std::setw(12) << t_v1 << "  | " << std::setw(8) << std::fixed << std::setprecision(4) << s_v1 << " | "
-              << std::setw(12) << t_v2 << "  | " << std::setw(8) << s_v2 << " | "
-              << std::setw(8) << std::fixed << std::setprecision(2) << eff_v2 << "%" << std::endl;
-
-    times_v1.push_back(t_v1);
-    times_v2.push_back(t_v2);
-    speedups_v1.push_back(s_v1);
-    speedups_v2.push_back(s_v2);
-  }
-
-  std::cout << std::string(100, '=') << std::endl;
-
-  std::cout << "\nИССЛЕДОВАНИЕ ПАРАМЕТРОВ SCHEDULE\n";
-  std::cout << "Фиксированное число потоков: " << std::min(8, max_threads) << std::endl;
-
-  std::vector<int> chunk_sizes = {1, 10, 100, 1000, 0};
-
-  for (int schedule = 0; schedule < 3; schedule++)
-  {
-    std::cout << "\n--- schedule type: " << (schedule == 0 ? "static" : schedule == 1 ? "dynamic"
-                                                                                      : "guided")
-              << " ---\n";
-    for (int chunk : chunk_sizes)
+    struct ScheduleConfig
     {
-      solver.reset();
-      solver.test_schedule(std::min(8, max_threads), schedule, chunk);
-    }
-  }
+        omp_sched_t kind;
+        int chunk;
+        const char *name;
+    };
 
-  // ПРОБЛЕМНОЕ МЕСТО - теперь эти строки точно будут выполнены
-  std::cout << "\n\n========== ДАННЫЕ ДЛЯ ГРАФИКОВ ==========\n";
-  std::cout << "threads = " << vector_to_string(available_threads) << std::endl;
-  std::cout << "times_v1 = " << vector_to_string(times_v1) << std::endl;
-  std::cout << "times_v2 = " << vector_to_string(times_v2) << std::endl;
-  std::cout << "speedups_v1 = " << vector_to_string(speedups_v1) << std::endl;
-  std::cout << "speedups_v2 = " << vector_to_string(speedups_v2) << std::endl;
+    const std::vector<ScheduleConfig> configs = {
+        {omp_sched_static, 1, "static,1"},
+        {omp_sched_static, 4, "static,4"},
+        {omp_sched_static, 100, "static,100"},
+        {omp_sched_static, N / num_threads[4], "static,N/T"},
+        {omp_sched_dynamic, 1, "dynamic,1"},
+        {omp_sched_dynamic, 4, "dynamic,4"},
+        {omp_sched_dynamic, 100, "dynamic,100"},
+        {omp_sched_dynamic, N / num_threads[4], "dynamic,N/T"},
+        {omp_sched_guided, 1, "guided,1"},
+        {omp_sched_guided, 4, "guided,4"},
+        {omp_sched_guided, 100, "guided,100"},
+        {omp_sched_guided, N / num_threads[4], "guided,N/T"},
+    };
 
-  std::cout << "\n========== ВЫВОДЫ ==========\n";
-  std::cout << "------------------------\n";
+    std::cout << std::string(80, '-') << "\n";
+    printf("%20s | %15s | %15s | %12s\n",
+           "Расписание", "Время (с)", "T1 (с)", "Ускорение");
+    std::cout << std::string(80, '-') << "\n";
 
-  double avg_speedup_v1 = 0, avg_speedup_v2 = 0;
-  int count = 0;
+    double T1_schedule = run_benchmark_averaged(solve_serial, N, 1, NUM_RUNS);
 
-  for (size_t i = 1; i < speedups_v1.size(); i++)
-  {
-    avg_speedup_v1 += speedups_v1[i];
-    avg_speedup_v2 += speedups_v2[i];
-    count++;
-  }
-
-  if (count > 0)
-  {
-    avg_speedup_v1 /= count;
-    avg_speedup_v2 /= count;
-  }
-
-  std::cout << "Среднее ускорение (без учета 1 потока) Вариант 1: " << avg_speedup_v1 << std::endl;
-  std::cout << "Среднее ускорение (без учета 1 потока) Вариант 2: " << avg_speedup_v2 << std::endl;
-
-  double max_speedup_v1 = 0, max_speedup_v2 = 0;
-  int max_threads_v1 = 0, max_threads_v2 = 0;
-
-  for (size_t i = 1; i < speedups_v1.size(); i++)
-  {
-    if (speedups_v1[i] > max_speedup_v1)
+    for (const auto &cfg : configs)
     {
-      max_speedup_v1 = speedups_v1[i];
-      max_threads_v1 = available_threads[i];
+        omp_set_schedule(cfg.kind, cfg.chunk);
+        double time = run_benchmark_averaged(solve_parallel_2, N, num_threads[4], NUM_RUNS);
+        double speedup = T1_schedule / time;
+
+        printf("%20s | %15.6f | %15.6f | %12.4f\n",
+               cfg.name, time, T1_schedule, speedup);
     }
-    if (speedups_v2[i] > max_speedup_v2)
+
+    std::cout << "\n=== ЗАПИСЬ РЕЗУЛЬТАТОВ В CSV ФАЙЛЫ ===\n";
+
+    std::ofstream iter_file("iterationData.csv");
+    std::ofstream summ_file("summary.csv");
+
+    if (iter_file && summ_file)
     {
-      max_speedup_v2 = speedups_v2[i];
-      max_threads_v2 = available_threads[i];
+        iter_file << "num_threads,run,time_serial,time_parallel_1,time_parallel_2\n";
+        summ_file << "num_threads,time_serial,time_parallel_1,time_parallel_2,speedup_1,speedup_2\n";
+
+        for (size_t t_idx = 0; t_idx < num_threads.size(); t_idx++)
+        {
+            int threads = num_threads[t_idx];
+
+            std::vector<double> serial_times(NUM_RUNS);
+            std::vector<double> parallel1_times(NUM_RUNS);
+            std::vector<double> parallel2_times(NUM_RUNS);
+
+            for (int run = 0; run < NUM_RUNS; run++)
+            {
+                serial_times[run] = run_single_measurement(solve_serial, N, 1);
+                parallel1_times[run] = run_single_measurement(solve_parallel_1, N, threads);
+                parallel2_times[run] = run_single_measurement(solve_parallel_2, N, threads);
+
+                iter_file << threads << "," << (run + 1) << ","
+                          << serial_times[run] << ","
+                          << parallel1_times[run] << ","
+                          << parallel2_times[run] << "\n";
+            }
+
+            double avg_serial = std::accumulate(serial_times.begin(), serial_times.end(), 0.0) / NUM_RUNS;
+            double avg_parallel1 = std::accumulate(parallel1_times.begin(), parallel1_times.end(), 0.0) / NUM_RUNS;
+            double avg_parallel2 = std::accumulate(parallel2_times.begin(), parallel2_times.end(), 0.0) / NUM_RUNS;
+
+            double speedup1 = avg_serial / avg_parallel1;
+            double speedup2 = avg_serial / avg_parallel2;
+
+            summ_file << threads << ","
+                      << avg_serial << ","
+                      << avg_parallel1 << ","
+                      << avg_parallel2 << ","
+                      << speedup1 << ","
+                      << speedup2 << "\n";
+        }
+        std::cout << "✓ Файлы iterationData.csv и summary.csv созданы\n";
     }
-  }
 
-  std::cout << "\nМаксимальное ускорение Вариант 1: " << max_speedup_v1
-            << " при " << max_threads_v1 << " потоках" << std::endl;
-  std::cout << "Максимальное ускорение Вариант 2: " << max_speedup_v2
-            << " при " << max_threads_v2 << " потоках" << std::endl;
+    std::ofstream iter_sc("iterationData_sc.csv");
+    std::ofstream summ_sc("summary_sc.csv");
 
-  std::cout << "\nПрограмма успешно завершена!" << std::endl;
+    if (iter_sc && summ_sc)
+    {
+        iter_sc << "config_description,run,time_serial,time_parallel\n";
+        summ_sc << "config_description,time_serial,time_parallel,speedup\n";
 
-  return 0;
+        for (const auto &cfg : configs)
+        {
+            omp_set_schedule(cfg.kind, cfg.chunk);
+
+            std::vector<double> serial_times(NUM_RUNS);
+            std::vector<double> parallel_times(NUM_RUNS);
+
+            for (int run = 0; run < NUM_RUNS; run++)
+            {
+                serial_times[run] = run_single_measurement(solve_serial, N, 1);
+                parallel_times[run] = run_single_measurement(solve_parallel_2, N, num_threads[4]);
+
+                iter_sc << cfg.name << "," << (run + 1) << ","
+                        << serial_times[run] << ","
+                        << parallel_times[run] << "\n";
+            }
+
+            double avg_serial = std::accumulate(serial_times.begin(), serial_times.end(), 0.0) / NUM_RUNS;
+            double avg_parallel = std::accumulate(parallel_times.begin(), parallel_times.end(), 0.0) / NUM_RUNS;
+            double speedup = avg_serial / avg_parallel;
+
+            summ_sc << cfg.name << ","
+                    << avg_serial << ","
+                    << avg_parallel << ","
+                    << speedup << "\n";
+        }
+        std::cout << "✓ Файлы iterationData_sc.csv и summary_sc.csv созданы\n";
+    }
+
+    std::cout << "\n=== ВЫВОДЫ ===\n";
+
+    auto max_speedup1 = *std::max_element(speedups1.begin(), speedups1.end());
+    auto max_speedup2 = *std::max_element(speedups2.begin(), speedups2.end());
+
+    std::cout << "Лучшее ускорение (простое среднее):\n";
+    printf("  Алгоритм 1: %.2f\n", max_speedup1);
+    printf("  Алгоритм 2: %.2f\n", max_speedup2);
+
+    double efficiency2 = speedups2.back() / num_threads.back() * 100;
+    printf("\nЭффективность алгоритма 2 при %d потоках: %.1f%%\n",
+           num_threads.back(), efficiency2);
+
+    if (efficiency2 > 80)
+        std::cout << "✓ Отличная масштабируемость\n";
+    else if (efficiency2 > 50)
+        std::cout << "✓ Хорошая масштабируемость\n";
+    else
+        std::cout << "✓ Удовлетворительная масштабируемость\n";
+
+    return 0;
 }
