@@ -80,7 +80,7 @@ double run_benchmark(size_t size, int num_threads, bool parallel_init = true)
 
     try
     {
-        matrix = new double[rows * cols];
+        matrix = new double[rows * cols]; // переделовать на человеческий или контейнер или умный указатель
         vector = new double[cols];
         result = new double[rows];
     }
