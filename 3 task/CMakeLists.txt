@@ -1,28 +1,25 @@
-cmake_minimum_required(VERSION 3.10)
-project(integration LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.16)
+project(parallelism_task3 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -mtune=native -Wall")
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
 
-find_package(OpenMP REQUIRED)
+if(MSVC)
+  add_compile_options(/O2 /W4)
+else()
+  add_compile_options(-O3 -march=native -mtune=native -Wall -Wextra)
+endif()
+
+add_executable(matrix_threads task1_matrix_threads/matrix_threads.cpp)
+add_executable(client_server task2_client_server/client_server.cpp)
+add_executable(check_results task2_client_server/check_results.cpp)
 
 find_package(Threads REQUIRED)
-
-set(OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin)
-file(MAKE_DIRECTORY ${OUTPUT_DIR})
-
-file(GLOB SOURCES "*.cpp")
-
-foreach(SRC ${SOURCES})
-    get_filename_component(EXE_NAME ${SRC} NAME_WE)
-    add_executable(${EXE_NAME} ${SRC})
-    set_target_properties(${EXE_NAME} PROPERTIES 
-        RUNTIME_OUTPUT_DIRECTORY ${OUTPUT_DIR}
-    )
-    
-    target_compile_options(${EXE_NAME} PRIVATE ${OpenMP_CXX_FLAGS})
-    target_link_libraries(${EXE_NAME} PRIVATE Threads::Threads OpenMP::OpenMP_CXX)
-endforeach()
+target_link_libraries(matrix_threads PRIVATE Threads::Threads)
+target_link_libraries(client_server PRIVATE Threads::Threads)
+target_link_libraries(check_results PRIVATE Threads::Threads)

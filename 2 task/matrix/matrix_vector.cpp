@@ -1,247 +1,556 @@
-#include <iostream>
+#include <cmath>
+#include <cstdint>
 #include <cstdlib>
-#include <cstring>
-#include <chrono>
-#include <omp.h>
-#include <vector>
-#include <algorithm>
-#include <numeric>
-#include <iomanip>
 #include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <new>
+#include <string>
+#include <vector>
+
+#include <omp.h>
+
+namespace
+{
+constexpr int kDefaultRepeats = 50;
+const std::vector<int> kThreadCounts = {1, 2, 4, 7, 8, 16, 20, 40};
+const std::vector<int> kMatrixSizes = {20000, 40000};
 
 void print_system_info()
 {
-    std::cout << "\n=== Информация о вычислительном узле ===\n";
-
-    system("lscpu | grep 'Model name'");
-    system("lscpu | grep 'CPU(s)' | head -1");
-    system("lscpu | grep 'NUMA'");
-
-    system("cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo 'N/A'");
-
-    system("numactl --hardware | grep 'available' 2>/dev/null || echo 'NUMA info not available'");
-    system("numactl --hardware | grep 'size' 2>/dev/null");
-
-    system("cat /etc/os-release | grep 'PRETTY_NAME' | cut -d'=' -f2 | tr -d '\"' 2>/dev/null");
-
-    std::cout << "=====================================\n\n";
+  std::cout << "\n=== Информация о вычислительном узле ===\n";
+  std::system("lscpu | grep 'Model name'");
+  std::system("cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo 'N/A'");
+  std::system("numactl --hardware 2>/dev/null | grep -E 'available|node [0-9]+ size' || echo 'NUMA info not available'");
+  std::system("cat /etc/os-release 2>/dev/null | grep 'PRETTY_NAME' | cut -d'=' -f2 | tr -d '\"'");
+  std::cout << "=====================================\n\n";
 }
 
-void init_matrix_parallel(double *matrix, size_t rows, size_t cols)
+void init_data(std::vector<double> &matrix, std::vector<double> &x, int n)
 {
-#pragma omp parallel for collapse(2)
-    for (size_t i = 0; i < rows; i++)
+  const std::size_t total = static_cast<std::size_t>(n) * static_cast<std::size_t>(n);
+
+#pragma omp parallel for schedule(static)
+  for (std::int64_t idx = 0; idx < static_cast<std::int64_t>(total); ++idx)
+  {
+    const int row = static_cast<int>(idx / n);
+    const int col = static_cast<int>(idx - static_cast<std::int64_t>(row) * n);
+    matrix[static_cast<std::size_t>(idx)] = 1.0 + 0.000001 * static_cast<double>((row + col) % 100);
+  }
+
+#pragma omp parallel for schedule(static)
+  for (int i = 0; i < n; ++i)
+  {
+    x[i] = 1.0 + 0.00001 * static_cast<double>(i % 100);
+  }
+}
+
+double multiply_matrix_vector(const std::vector<double> &matrix,
+                              const std::vector<double> &x,
+                              std::vector<double> &y,
+                              int n,
+                              int threads)
+{
+  omp_set_num_threads(threads);
+  const double start = omp_get_wtime();
+
+#pragma omp parallel for schedule(static)
+  for (int i = 0; i < n; ++i)
+  {
+    const double *row = matrix.data() + static_cast<std::size_t>(i) * static_cast<std::size_t>(n);
+    double sum = 0.0;
+    for (int j = 0; j < n; ++j)
     {
-        for (size_t j = 0; j < cols; j++)
-            matrix[i * cols + j] = static_cast<double>(i + j);
+      sum += row[j] * x[j];
     }
+    y[i] = sum;
+  }
+
+  return omp_get_wtime() - start;
 }
 
-void init_vector_parallel(double *vector, size_t size)
+double checksum(const std::vector<double> &y)
 {
-#pragma omp parallel for
-    for (size_t i = 0; i < size; i++)
-        vector[i] = static_cast<double>(i);
+  double sum = 0.0;
+#pragma omp parallel for reduction(+ : sum) schedule(static)
+  for (std::int64_t i = 0; i < static_cast<std::int64_t>(y.size()); ++i)
+  {
+    sum += y[static_cast<std::size_t>(i)];
+  }
+  return sum;
 }
+} // namespace
 
-void matrix_vector_mult_serial(const double *matrix, const double *vector,
-                               double *result, size_t rows, size_t cols)
+int main(int argc, char **argv)
 {
-    for (size_t i = 0; i < rows; i++)
-    {
-        result[i] = 0.0;
-        for (size_t j = 0; j < cols; j++)
-            result[i] += matrix[i * cols + j] * vector[j];
-    }
-}
+  const int repeats = (argc > 1) ? std::stoi(argv[1]) : kDefaultRepeats;
 
-void matrix_vector_mult_parallel(const double *matrix, const double *vector,
-                                 double *result, size_t rows, size_t cols)
-{
-#pragma omp parallel for
-    for (size_t i = 0; i < rows; i++)
-    {
-        result[i] = 0.0;
-        for (size_t j = 0; j < cols; j++)
-        {
-            result[i] += matrix[i * cols + j] * vector[j];
-        }
-    }
-}
+  print_system_info();
+  std::cout << std::fixed << std::setprecision(6);
+  std::cout << "Количество запусков для каждого режима: " << repeats << "\n";
 
-double run_benchmark(size_t size, int num_threads, bool parallel_init = true)
-{
-    size_t rows = size;
-    size_t cols = size;
+  std::ofstream runs_csv("matrix_vector_runs.csv");
+  std::ofstream summary_csv("matrix_vector_summary.csv");
+  if (!runs_csv || !summary_csv)
+  {
+    std::cerr << "Не удалось открыть CSV файлы для записи\n";
+    return 1;
+  }
 
-    double *matrix = nullptr;
-    double *vector = nullptr;
-    double *result = nullptr;
+  runs_csv << "size,threads,run,time_sec,checksum\n";
+  summary_csv << "size,threads,avg_time_sec,speedup,efficiency,checksum\n";
 
+  for (const int n : kMatrixSizes)
+  {
+    std::cout << "\n=== Размер матрицы " << n << "x" << n << " ===\n";
+    const std::size_t total = static_cast<std::size_t>(n) * static_cast<std::size_t>(n);
+
+    std::vector<double> matrix;
+    std::vector<double> x;
+    std::vector<double> y;
     try
     {
-        matrix = new double[rows * cols]; // переделовать на человеческий или контейнер или умный указатель
-        vector = new double[cols];
-        result = new double[rows];
+      matrix.resize(total);
+      x.resize(static_cast<std::size_t>(n));
+      y.resize(static_cast<std::size_t>(n));
     }
-    catch (const std::bad_alloc &e)
+    catch (const std::bad_alloc &)
     {
-        delete[] matrix;
-        delete[] vector;
-        delete[] result;
-        return -1.0;
+      std::cerr << "Недостаточно памяти для матрицы " << n << "x" << n << "\n";
+      return 2;
     }
 
-    if (parallel_init && num_threads > 0)
+    init_data(matrix, x, n);
+
+    double base_time = 0.0;
+    for (const int threads : kThreadCounts)
     {
-        omp_set_num_threads(num_threads);
-        init_matrix_parallel(matrix, rows, cols);
-        init_vector_parallel(vector, cols);
+      double total_time = 0.0;
+      double last_checksum = 0.0;
+
+      for (int run = 1; run <= repeats; ++run)
+      {
+        const double elapsed = multiply_matrix_vector(matrix, x, y, n, threads);
+        last_checksum = checksum(y);
+        total_time += elapsed;
+
+        runs_csv << n << "," << threads << "," << run << ","
+                 << elapsed << "," << std::setprecision(12) << last_checksum << std::setprecision(6) << "\n";
+      }
+
+      const double avg_time = total_time / static_cast<double>(repeats);
+      if (threads == 1)
+      {
+        base_time = avg_time;
+      }
+
+      const double speedup = base_time / avg_time;
+      const double efficiency = speedup / static_cast<double>(threads);
+      summary_csv << n << "," << threads << "," << avg_time << ","
+                  << speedup << "," << efficiency << "," << last_checksum << "\n";
+
+      std::cout << "threads=" << std::setw(2) << threads
+                << " avg=" << avg_time
+                << " speedup=" << speedup
+                << " efficiency=" << efficiency << "\n";
     }
-    else
-    {
-        for (size_t i = 0; i < rows; i++)
-        {
-            for (size_t j = 0; j < cols; j++)
-            {
-                matrix[i * cols + j] = static_cast<double>(i + j);
-            }
-        }
-        for (size_t j = 0; j < cols; j++)
-        {
-            vector[j] = static_cast<double>(j);
-        }
-    }
+  }
 
-    if (num_threads > 0)
-    {
-        omp_set_num_threads(num_threads);
-    }
-
-    auto start = std::chrono::high_resolution_clock::now();
-
-    if (num_threads == 0)
-    {
-        matrix_vector_mult_serial(matrix, vector, result, rows, cols);
-    }
-    else
-    {
-        matrix_vector_mult_parallel(matrix, vector, result, rows, cols);
-    }
-
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-    double seconds = elapsed.count();
-
-    delete[] matrix;
-    delete[] vector;
-    delete[] result;
-
-    return seconds;
+  std::cout << "\nСохранено: matrix_vector_runs.csv, matrix_vector_summary.csv\n";
+  return 0;
 }
+#if 0
+#include <cmath>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <string>
+#include <vector>
 
-double run_benchmark_averaged(size_t size, int num_threads, bool parallel_init = true, int num_runs = 5)
+#include <omp.h>
+
+struct SolverResult
 {
-    std::vector<double> times;
+  double elapsed_sec = 0.0;
+  int iterations = 0;
+  double diff_norm = 0.0;
+  double error_norm = 0.0;
+};
 
-    for (int run = 0; run < num_runs; run++)
-    {
-        double time = run_benchmark(size, num_threads, parallel_init);
-        if (time < 0)
-            return -1.0;
-        times.push_back(time);
-    }
+enum class ScheduleKind
+{
+  Static,
+  Dynamic,
+  Guided
+};
 
-    std::sort(times.begin(), times.end());
-    double sum = 0;
-    for (int i = 1; i < num_runs - 1; i++)
-    {
-        sum += times[i];
-    }
-
-    return sum / (num_runs - 2);
+static std::string to_string_schedule(ScheduleKind kind)
+{
+  switch (kind)
+  {
+  case ScheduleKind::Static:
+    return "static";
+  case ScheduleKind::Dynamic:
+    return "dynamic";
+  case ScheduleKind::Guided:
+    return "guided";
+  }
+  return "unknown";
 }
 
-void set_binding_policy(const std::string &policy)
+static omp_sched_t to_omp_schedule(ScheduleKind kind)
 {
-    if (policy == "close")
-    {
-        setenv("OMP_PROC_BIND", "close", 1);
-        setenv("OMP_PLACES", "cores", 1);
-    }
-    else if (policy == "spread")
-    {
-        setenv("OMP_PROC_BIND", "spread", 1);
-        setenv("OMP_PLACES", "cores", 1);
-    }
-    else
-    {
-        setenv("OMP_PROC_BIND", "false", 1);
-    }
+  switch (kind)
+  {
+  case ScheduleKind::Static:
+    return omp_sched_static;
+  case ScheduleKind::Dynamic:
+    return omp_sched_dynamic;
+  case ScheduleKind::Guided:
+    return omp_sched_guided;
+  }
+  return omp_sched_static;
 }
 
-int main()
+static SolverResult solve_variant1_parallel_for(
+    int n, int max_iters, double eps, int threads, double tau_factor)
 {
-    print_system_info();
-    const size_t sizes[] = {20000, 40000};
-    const char *size_labels[] = {"20000", "40000"};
-    const int num_threads[] = {2, 4, 7, 8, 16, 20, 40};
-    const int num_threads_count = sizeof(num_threads) / sizeof(num_threads[0]);
+  std::vector<double> x(n, 0.0);
+  std::vector<double> x_new(n, 0.0);
+  std::vector<double> b(n, static_cast<double>(n + 1));
+  const double tau = tau_factor / static_cast<double>(n + 1);
 
-    const std::vector<std::string> binding_policies = {"none", "close", "spread"};
-    const std::string policy_names[] = {"none", "close", "spread"};
+  omp_set_num_threads(threads);
 
-    const int NUM_RUNS = 5;
+  double diff = std::numeric_limits<double>::infinity();
+  int it = 0;
+  const double t0 = omp_get_wtime();
 
-    std::ofstream csv_file("benchmark_results.csv");
-    if (!csv_file.is_open())
+  while (it < max_iters && diff > eps)
+  {
+    double sum_x = 0.0;
+#pragma omp parallel for reduction(+ : sum_x)
+    for (int i = 0; i < n; ++i)
     {
-        return 1;
+      sum_x += x[i];
     }
 
-    csv_file << "Policy,Matrix_Size,Matrix_Size_Label,Threads,Time_Seconds,Speedup\n";
-
-    for (size_t policy_idx = 0; policy_idx < binding_policies.size(); policy_idx++)
+#pragma omp parallel for
+    for (int i = 0; i < n; ++i)
     {
-        std::string policy = binding_policies[policy_idx];
-        set_binding_policy(policy);
+      const double ax_i = sum_x + x[i];
+      x_new[i] = x[i] - tau * (ax_i - b[i]);
+    }
 
-        for (int s = 0; s < 2; s++)
+    diff = 0.0;
+#pragma omp parallel for reduction(+ : diff)
+    for (int i = 0; i < n; ++i)
+    {
+      const double d = x_new[i] - x[i];
+      diff += d * d;
+    }
+    diff = std::sqrt(diff);
+
+#pragma omp parallel for
+    for (int i = 0; i < n; ++i)
+    {
+      x[i] = x_new[i];
+    }
+
+    ++it;
+  }
+
+  const double elapsed = omp_get_wtime() - t0;
+
+  double err = 0.0;
+#pragma omp parallel for reduction(+ : err)
+  for (int i = 0; i < n; ++i)
+  {
+    const double d = x[i] - 1.0;
+    err += d * d;
+  }
+  err = std::sqrt(err);
+
+  return SolverResult{elapsed, it, diff, err};
+}
+
+static SolverResult solve_variant2_single_parallel(
+    int n, int max_iters, double eps, int threads, double tau_factor)
+{
+  std::vector<double> x(n, 0.0);
+  std::vector<double> x_new(n, 0.0);
+  std::vector<double> b(n, static_cast<double>(n + 1));
+  const double tau = tau_factor / static_cast<double>(n + 1);
+
+  omp_set_num_threads(threads);
+
+  double diff = std::numeric_limits<double>::infinity();
+  int it = 0;
+  const double t0 = omp_get_wtime();
+
+  double sum_x = 0.0;
+  double diff_local = 0.0;
+  bool stop = false;
+#pragma omp parallel shared(x, x_new, b, diff, it, sum_x, diff_local, stop)
+  {
+    while (true)
+    {
+#pragma omp single
+      {
+        stop = false;
+        if (it >= max_iters || diff <= eps)
         {
-            size_t size = sizes[s];
-
-            double T1 = run_benchmark_averaged(size, 0, false, NUM_RUNS);
-            if (T1 < 0)
-                continue;
-
-            csv_file << policy_names[policy_idx] << ","
-                     << size << ","
-                     << size_labels[s] << ","
-                     << "0" << ","
-                     << T1 << ","
-                     << "1.0\n";
-
-            for (int t = 0; t < num_threads_count; t++)
-            {
-                int threads = num_threads[t];
-                double Tp_avg = run_benchmark_averaged(size, threads, true, NUM_RUNS);
-
-                if (Tp_avg < 0)
-                    continue;
-
-                double speedup = T1 / Tp_avg;
-
-                csv_file << policy_names[policy_idx] << ","
-                         << size << ","
-                         << size_labels[s] << ","
-                         << threads << ","
-                         << Tp_avg << ","
-                         << speedup << "\n";
-            }
+          stop = true;
         }
+      }
+#pragma omp barrier
+      if (stop)
+      {
+        break;
+      }
+
+#pragma omp single
+      {
+        sum_x = 0.0;
+      }
+#pragma omp barrier
+      double sum_part = 0.0;
+#pragma omp for nowait
+      for (int i = 0; i < n; ++i)
+      {
+        sum_part += x[i];
+      }
+#pragma omp atomic update
+      sum_x += sum_part;
+#pragma omp barrier
+
+#pragma omp for
+      for (int i = 0; i < n; ++i)
+      {
+        const double ax_i = sum_x + x[i];
+        x_new[i] = x[i] - tau * (ax_i - b[i]);
+      }
+
+#pragma omp single
+      {
+        diff_local = 0.0;
+      }
+#pragma omp barrier
+      double diff_part = 0.0;
+#pragma omp for nowait
+      for (int i = 0; i < n; ++i)
+      {
+        const double d = x_new[i] - x[i];
+        diff_part += d * d;
+      }
+#pragma omp atomic update
+      diff_local += diff_part;
+#pragma omp barrier
+
+#pragma omp single
+      {
+        diff = std::sqrt(diff_local);
+        ++it;
+      }
+
+#pragma omp for
+      for (int i = 0; i < n; ++i)
+      {
+        x[i] = x_new[i];
+      }
+#pragma omp barrier
     }
+  }
 
-    csv_file.close();
+  const double elapsed = omp_get_wtime() - t0;
 
-    return 0;
+  double err = 0.0;
+#pragma omp parallel for reduction(+ : err)
+  for (int i = 0; i < n; ++i)
+  {
+    const double d = x[i] - 1.0;
+    err += d * d;
+  }
+  err = std::sqrt(err);
+
+  return SolverResult{elapsed, it, diff, err};
 }
+
+static SolverResult solve_variant2_runtime_schedule(
+    int n, int max_iters, double eps, int threads, double tau_factor, ScheduleKind sched, int chunk)
+{
+  std::vector<double> x(n, 0.0);
+  std::vector<double> x_new(n, 0.0);
+  std::vector<double> b(n, static_cast<double>(n + 1));
+  const double tau = tau_factor / static_cast<double>(n + 1);
+
+  omp_set_num_threads(threads);
+  omp_set_schedule(to_omp_schedule(sched), chunk);
+
+  double diff = std::numeric_limits<double>::infinity();
+  int it = 0;
+  const double t0 = omp_get_wtime();
+
+  double sum_x = 0.0;
+  double diff_local = 0.0;
+  bool stop = false;
+#pragma omp parallel shared(x, x_new, b, diff, it, sum_x, diff_local, stop)
+  {
+    while (true) // переменную внутрь!!!
+    {
+#pragma omp single
+      {
+        stop = false;
+        if (it >= max_iters || diff <= eps)
+        {
+          stop = true;
+        }
+      }
+#pragma omp barrier
+      if (stop)
+      {
+        break;
+      }
+
+#pragma omp single
+      {
+        sum_x = 0.0;
+      }
+#pragma omp barrier
+      double sum_part = 0.0;
+#pragma omp for schedule(runtime) nowait
+      for (int i = 0; i < n; ++i)
+      {
+        sum_part += x[i];
+      }
+#pragma omp atomic update
+      sum_x += sum_part;
+#pragma omp barrier
+
+#pragma omp for schedule(runtime)
+      for (int i = 0; i < n; ++i)
+      {
+        const double ax_i = sum_x + x[i];
+        x_new[i] = x[i] - tau * (ax_i - b[i]);
+      }
+
+#pragma omp single
+      {
+        diff_local = 0.0;
+      }
+#pragma omp barrier
+      double diff_part = 0.0;
+#pragma omp for schedule(runtime) nowait
+      for (int i = 0; i < n; ++i)
+      {
+        const double d = x_new[i] - x[i];
+        diff_part += d * d;
+      }
+#pragma omp atomic update
+      diff_local += diff_part;
+#pragma omp barrier
+
+#pragma omp single
+      {
+        diff = std::sqrt(diff_local);
+        ++it;
+      }
+
+#pragma omp for schedule(runtime)
+      for (int i = 0; i < n; ++i)
+      {
+        x[i] = x_new[i];
+      }
+#pragma omp barrier
+    }
+  }
+
+  const double elapsed = omp_get_wtime() - t0;
+
+  double err = 0.0;
+#pragma omp parallel for reduction(+ : err)
+  for (int i = 0; i < n; ++i)
+  {
+    const double d = x[i] - 1.0;
+    err += d * d;
+  }
+  err = std::sqrt(err);
+
+  return SolverResult{elapsed, it, diff, err};
+}
+
+int main(int argc, char **argv)
+{
+  // Библеотеку буст
+  const int n = (argc > 1) ? std::stoi(argv[1]) : 20000;
+  const int max_iters = (argc > 2) ? std::stoi(argv[2]) : 5000;
+  const double eps = (argc > 3) ? std::stod(argv[3]) : 1e-6;
+  const int repeats = (argc > 4) ? std::stoi(argv[4]) : 3;
+  const int fixed_threads_for_schedule = (argc > 5) ? std::stoi(argv[5]) : std::max(1, omp_get_max_threads() / 2);
+  const double tau_factor = (argc > 6) ? std::stod(argv[6]) : 1e-3;
+
+  const int max_threads = omp_get_max_threads();
+  std::cout << "OpenMP max threads: " << max_threads << "\n";
+  std::cout << "N=" << n << ", max_iters=" << max_iters << ", eps=" << eps
+            << ", repeats=" << repeats << ", tau_factor=" << tau_factor << "\n";
+
+  std::ofstream scaling_csv("scaling_results.csv");
+  scaling_csv << "variant,threads,repeat,time_sec,iterations,diff_norm,error_norm\n";
+
+  for (int threads = 1; threads <= max_threads; ++threads)
+  {
+    for (int r = 1; r <= repeats; ++r)
+    {
+      const auto res1 = solve_variant1_parallel_for(n, max_iters, eps, threads, tau_factor);
+      scaling_csv << "variant1," << threads << "," << r << ","
+                  << std::setprecision(10) << res1.elapsed_sec << ","
+                  << res1.iterations << "," << res1.diff_norm << "," << res1.error_norm << "\n";
+      std::cout << "[v1] threads=" << threads << ", repeat=" << r
+                << ", time=" << res1.elapsed_sec << " sec, iters=" << res1.iterations << "\n";
+
+      const auto res2 = solve_variant2_single_parallel(n, max_iters, eps, threads, tau_factor);
+      scaling_csv << "variant2," << threads << "," << r << ","
+                  << std::setprecision(10) << res2.elapsed_sec << ","
+                  << res2.iterations << "," << res2.diff_norm << "," << res2.error_norm << "\n";
+      std::cout << "[v2] threads=" << threads << ", repeat=" << r
+                << ", time=" << res2.elapsed_sec << " sec, iters=" << res2.iterations << "\n";
+    }
+  }
+  scaling_csv.close();
+
+  const std::vector<ScheduleKind> schedules = {
+      ScheduleKind::Static,
+      ScheduleKind::Dynamic,
+      ScheduleKind::Guided};
+  const std::vector<int> chunks = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024};
+
+  std::ofstream schedule_csv("schedule_results.csv");
+  schedule_csv << "schedule,chunk,threads,repeat,time_sec,iterations,diff_norm,error_norm\n";
+
+  const int sched_threads = std::min(max_threads, std::max(1, fixed_threads_for_schedule));
+  for (const auto sched : schedules)
+  {
+    for (const int chunk : chunks)
+    {
+      for (int r = 1; r <= repeats; ++r)
+      {
+        const auto res = solve_variant2_runtime_schedule(
+            n, max_iters, eps, sched_threads, tau_factor, sched, chunk);
+        schedule_csv << to_string_schedule(sched) << "," << chunk << "," << sched_threads << ","
+                     << r << "," << std::setprecision(10) << res.elapsed_sec << ","
+                     << res.iterations << "," << res.diff_norm << "," << res.error_norm << "\n";
+        std::cout << "[sched] " << to_string_schedule(sched)
+                  << ", chunk=" << chunk
+                  << ", repeat=" << r
+                  << ", time=" << res.elapsed_sec << " sec\n";
+      }
+    }
+  }
+  schedule_csv.close();
+
+  std::cout << "\nSaved: scaling_results.csv, schedule_results.csv\n";
+  return 0;
+}
+#endif

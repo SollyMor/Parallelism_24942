@@ -1,378 +1,372 @@
+﻿#include <algorithm>
 #include <cmath>
-#include <chrono>
-#include <fstream>
-#include <iostream>
-#include <iomanip>
-#include <omp.h>
-#include <vector>
-#include <algorithm>
-#include <string>
 #include <cstdlib>
-#include <numeric>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <string>
+#include <utility>
+#include <vector>
 
-const double EPSILON = 1e-13;
-const double TAU = -1e-5;
-const int N = 7100;
-const int NUM_RUNS = 5;
+#include <omp.h>
+
+namespace
+{
+constexpr int kDefaultRepeats = 50;
+const std::vector<int> kThreadCounts = {1, 2, 4, 7, 8, 16, 20, 40};
+
+struct SolverResult
+{
+  double elapsed_sec = 0.0;
+  int iterations = 0;
+  double diff_norm = 0.0;
+  double error_norm = 0.0;
+};
+
+struct Workspace
+{
+  std::vector<double> x;
+  std::vector<double> x_new;
+
+  explicit Workspace(int n)
+      : x(static_cast<std::size_t>(n)),
+        x_new(static_cast<std::size_t>(n))
+  {
+  }
+
+  void reset(int n)
+  {
+#pragma omp parallel for schedule(static)
+    for (int i = 0; i < n; ++i)
+    {
+      x[static_cast<std::size_t>(i)] = 0.0;
+      x_new[static_cast<std::size_t>(i)] = 0.0;
+    }
+  }
+};
+
+struct ScheduleConfig
+{
+  omp_sched_t kind;
+  int chunk;
+  const char *name;
+};
 
 void print_system_info()
 {
-    std::cout << "\n=== Информация о вычислительном узле ===\n";
-    system("lscpu | grep 'Model name'");
-    system("lscpu | grep 'CPU(s)' | head -1");
-    system("lscpu | grep 'NUMA'");
-    system("cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo 'N/A'");
-    system("numactl --hardware | grep 'available' 2>/dev/null || echo 'NUMA info not available'");
-    system("numactl --hardware | grep 'size' 2>/dev/null");
-    system("cat /etc/os-release | grep 'PRETTY_NAME' | cut -d'=' -f2 | tr -d '\"' 2>/dev/null");
-    std::cout << "=====================================\n\n";
+  std::cout << "\n=== System information ===\n";
+  std::system("lscpu | grep 'Model name'");
+  std::system("cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo 'N/A'");
+  std::system("numactl --hardware 2>/dev/null | grep -E 'available|node [0-9]+ size' || echo 'NUMA info not available'");
+  std::system("cat /etc/os-release 2>/dev/null | grep 'PRETTY_NAME' | cut -d'=' -f2 | tr -d '\"'");
+  std::cout << "=====================================\n\n";
 }
 
-void init_system(std::vector<double> &a, std::vector<double> &b, std::vector<double> &x, size_t n)
+double compute_error_norm(const std::vector<double> &x)
 {
-    for (size_t i = 0; i < n; i++)
-    {
-        for (size_t j = 0; j < n; j++)
-        {
-            a[i * n + j] = 1.0 + (i == j ? 1.0 : 0.0);
-        }
-        b[i] = static_cast<double>(n + 1);
-        x[i] = 0.0;
-    }
+  double err = 0.0;
+#pragma omp parallel for reduction(+ : err) schedule(static)
+  for (int i = 0; i < static_cast<int>(x.size()); ++i)
+  {
+    const double d = x[static_cast<std::size_t>(i)] - 1.0;
+    err += d * d;
+  }
+  return std::sqrt(err);
 }
 
-void solve_serial(const std::vector<double> &a, const std::vector<double> &b,
-                  std::vector<double> &x, size_t n, int /*num_threads*/)
+SolverResult solve_variant1(Workspace &ws, int n, int max_iters, double eps, int threads, double tau_factor)
 {
-    std::vector<double> diff(n);
-    double b_len_sq = 0.0;
-    double dev = 0.0;
+  ws.reset(n);
+  omp_set_num_threads(threads);
 
-    for (size_t i = 0; i < n; i++)
-    {
-        b_len_sq += b[i] * b[i];
-        diff[i] = 0.0;
-    }
-    dev = b_len_sq;
+  const double b_value = static_cast<double>(n + 1);
+  const double tau = tau_factor / b_value;
+  double diff = std::numeric_limits<double>::infinity();
+  int iteration = 0;
+  const double start = omp_get_wtime();
 
-    while (std::sqrt(dev / b_len_sq) >= EPSILON)
+  while (iteration < max_iters && diff > eps)
+  {
+    double sum_x = 0.0;
+#pragma omp parallel for reduction(+ : sum_x) schedule(static)
+    for (int i = 0; i < n; ++i)
     {
-        dev = 0.0;
-        for (size_t i = 0; i < n; ++i)
-        {
-            x[i] = x[i] - TAU * diff[i];
-        }
-        for (size_t i = 0; i < n; ++i)
-        {
-            double sum_ax = 0.0;
-            for (size_t j = 0; j < n; ++j)
-                sum_ax += a[i * n + j] * x[j];
-            diff[i] = b[i] - sum_ax;
-            dev += diff[i] * diff[i];
-        }
+      sum_x += ws.x[static_cast<std::size_t>(i)];
     }
+
+#pragma omp parallel for schedule(static)
+    for (int i = 0; i < n; ++i)
+    {
+      const double ax = sum_x + ws.x[static_cast<std::size_t>(i)];
+      ws.x_new[static_cast<std::size_t>(i)] = ws.x[static_cast<std::size_t>(i)] - tau * (ax - b_value);
+    }
+
+    diff = 0.0;
+#pragma omp parallel for reduction(+ : diff) schedule(static)
+    for (int i = 0; i < n; ++i)
+    {
+      const double d = ws.x_new[static_cast<std::size_t>(i)] - ws.x[static_cast<std::size_t>(i)];
+      diff += d * d;
+    }
+    diff = std::sqrt(diff);
+    std::swap(ws.x, ws.x_new);
+    ++iteration;
+  }
+
+  return {omp_get_wtime() - start, iteration, diff, compute_error_norm(ws.x)};
 }
 
-void solve_parallel_1(const std::vector<double> &a, const std::vector<double> &b,
-                      std::vector<double> &x, size_t n, int num_threads)
+SolverResult solve_variant2(Workspace &ws,
+                            int n,
+                            int max_iters,
+                            double eps,
+                            int threads,
+                            double tau_factor,
+                            bool runtime_schedule)
 {
-    std::vector<double> diff(n);
-    double b_len_sq = 0.0;
-    double dev = 0.0;
+  ws.reset(n);
+  omp_set_num_threads(threads);
 
-    for (size_t i = 0; i < n; ++i)
+  const double b_value = static_cast<double>(n + 1);
+  const double tau = tau_factor / b_value;
+  double diff = std::numeric_limits<double>::infinity();
+  double sum_x = 0.0;
+  double diff_sq = 0.0;
+  int iteration = 0;
+  bool stop = false;
+  const double start = omp_get_wtime();
+
+#pragma omp parallel shared(ws, diff, sum_x, diff_sq, iteration, stop)
+  {
+    while (true)
     {
-        b_len_sq += b[i] * b[i];
-        diff[i] = 0.0;
-    }
-    dev = b_len_sq;
-
-    while (std::sqrt(dev / b_len_sq) >= EPSILON)
-    {
-        dev = 0.0;
-#pragma omp parallel for num_threads(num_threads)
-        for (size_t i = 0; i < n; ++i)
-        {
-            x[i] = x[i] - TAU * diff[i];
-        }
-#pragma omp parallel for num_threads(num_threads) reduction(+ : dev)
-        for (size_t i = 0; i < n; ++i)
-        {
-            double sum_ax = 0.0;
-            for (size_t j = 0; j < n; ++j)
-                sum_ax += a[i * n + j] * x[j];
-            diff[i] = b[i] - sum_ax;
-            dev += diff[i] * diff[i];
-        }
-    }
-}
-
-void solve_parallel_2(const std::vector<double> &a, const std::vector<double> &b,
-                      std::vector<double> &x, size_t n, int num_threads)
-{
-    std::vector<double> diff(n);
-    double b_len_sq = 0.0;
-
-    for (size_t i = 0; i < n; ++i)
-    {
-        b_len_sq += b[i] * b[i];
-        diff[i] = 0.0;
-    }
-
-    double dev = 0.0;
-    bool stop = false;
-
-#pragma omp parallel num_threads(num_threads) shared(a, b, x, diff, dev, stop) firstprivate(b_len_sq)
-    {
-        while (!stop)
-        {
 #pragma omp single
-            {
-                dev = 0.0;
-            }
-#pragma omp for schedule(runtime)
-            for (size_t i = 0; i < n; ++i)
-            {
-                x[i] = x[i] - TAU * diff[i];
-            }
-#pragma omp for schedule(runtime) reduction(+ : dev)
-            for (size_t i = 0; i < n; ++i)
-            {
-                double sum_ax = 0.0;
-                for (size_t j = 0; j < n; ++j)
-                {
-                    sum_ax += a[i * n + j] * x[j];
-                }
-                diff[i] = b[i] - sum_ax;
-                dev += diff[i] * diff[i];
-            }
-#pragma omp single
-            {
-                stop = (std::sqrt(dev / b_len_sq) < EPSILON);
-            }
+      {
+        stop = (iteration >= max_iters || diff <= eps);
+        sum_x = 0.0;
+        diff_sq = 0.0;
+      }
 #pragma omp barrier
-        }
-    }
-}
+      if (stop)
+      {
+        break;
+      }
 
-double run_single_measurement(void (*solve)(const std::vector<double> &, const std::vector<double> &,
-                                            std::vector<double> &, size_t, int),
-                              size_t n, int num_threads)
-{
-    std::vector<double> a(n * n);
-    std::vector<double> b(n);
-    std::vector<double> x(n);
-    init_system(a, b, x, n);
-
-    auto start = std::chrono::steady_clock::now();
-    solve(a, b, x, n, num_threads);
-    auto end = std::chrono::steady_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-
-    return elapsed.count();
-}
-
-double run_benchmark_averaged(void (*solve)(const std::vector<double> &, const std::vector<double> &,
-                                            std::vector<double> &, size_t, int),
-                              size_t n, int num_threads, int num_runs = NUM_RUNS)
-{
-    double sum = 0.0;
-
-    for (int run = 0; run < num_runs; run++)
-    {
-        double time = run_single_measurement(solve, n, num_threads);
-        sum += time;
-    }
-
-    return sum / num_runs;
-}
-
-int main()
-{
-    print_system_info();
-
-    std::cout << std::fixed << std::setprecision(6);
-    std::cout << "\n=== РЕШЕНИЕ СЛАУ МЕТОДОМ ПРОСТЫХ ИТЕРАЦИЙ ===\n";
-    std::cout << "Размер матрицы: " << N << "×" << N << "\n";
-    std::cout << "Точность: " << EPSILON << "\n";
-    std::cout << "Количество запусков: " << NUM_RUNS << " (простое среднее)\n";
-
-    const std::vector<int> num_threads = {1, 2, 4, 7, 8, 16, 20, 40};
-    const int num_threads_count = num_threads.size();
-
-    std::cout << "\n=== ФАЗА 1: СРАВНЕНИЕ АЛГОРИТМОВ ===\n";
-
-    std::cout << "\nПараллельные алгоритмы:\n";
-    std::cout << std::string(100, '-') << "\n";
-    printf("%8s | %15s | %15s | %15s | %12s | %12s\n",
-           "Потоки", "T1 (с)", "Время 1 (с)", "Время 2 (с)", "Ускор 1", "Ускор 2");
-    std::cout << std::string(100, '-') << "\n";
-
-    std::vector<double> times1, times2, speedups1, speedups2;
-
-    for (int threads : num_threads)
-    {
-        double T1 = run_benchmark_averaged(solve_serial, N, 1, NUM_RUNS);
-        double time1 = run_benchmark_averaged(solve_parallel_1, N, threads, NUM_RUNS);
-        double time2 = run_benchmark_averaged(solve_parallel_2, N, threads, NUM_RUNS);
-
-        double speedup1 = T1 / time1;
-        double speedup2 = T1 / time2;
-
-        times1.push_back(time1);
-        times2.push_back(time2);
-        speedups1.push_back(speedup1);
-        speedups2.push_back(speedup2);
-
-        printf("%8d | %15.6f | %15.6f | %15.6f | %12.4f | %12.4f\n",
-               threads, T1, time1, time2, speedup1, speedup2);
-    }
-
-    std::cout << "\n=== ФАЗА 2: ИССЛЕДОВАНИЕ РАСПИСАНИЙ (SCHEDULE) ===\n";
-    std::cout << "Используется алгоритм 2 с " << num_threads[4] << " потоками\n\n";
-
-    struct ScheduleConfig
-    {
-        omp_sched_t kind;
-        int chunk;
-        const char *name;
-    };
-
-    const std::vector<ScheduleConfig> configs = {
-        {omp_sched_static, 1, "static,1"},
-        {omp_sched_static, 4, "static,4"},
-        {omp_sched_static, 100, "static,100"},
-        {omp_sched_static, N / num_threads[4], "static,N/T"},
-        {omp_sched_dynamic, 1, "dynamic,1"},
-        {omp_sched_dynamic, 4, "dynamic,4"},
-        {omp_sched_dynamic, 100, "dynamic,100"},
-        {omp_sched_dynamic, N / num_threads[4], "dynamic,N/T"},
-        {omp_sched_guided, 1, "guided,1"},
-        {omp_sched_guided, 4, "guided,4"},
-        {omp_sched_guided, 100, "guided,100"},
-        {omp_sched_guided, N / num_threads[4], "guided,N/T"},
-    };
-
-    std::cout << std::string(80, '-') << "\n";
-    printf("%20s | %15s | %15s | %12s\n",
-           "Расписание", "Время (с)", "T1 (с)", "Ускорение");
-    std::cout << std::string(80, '-') << "\n";
-
-    double T1_schedule = run_benchmark_averaged(solve_serial, N, 1, NUM_RUNS);
-
-    for (const auto &cfg : configs)
-    {
-        omp_set_schedule(cfg.kind, cfg.chunk);
-        double time = run_benchmark_averaged(solve_parallel_2, N, num_threads[4], NUM_RUNS);
-        double speedup = T1_schedule / time;
-
-        printf("%20s | %15.6f | %15.6f | %12.4f\n",
-               cfg.name, time, T1_schedule, speedup);
-    }
-
-    std::cout << "\n=== ЗАПИСЬ РЕЗУЛЬТАТОВ В CSV ФАЙЛЫ ===\n";
-
-    std::ofstream iter_file("iterationData.csv");
-    std::ofstream summ_file("summary.csv");
-
-    if (iter_file && summ_file)
-    {
-        iter_file << "num_threads,run,time_serial,time_parallel_1,time_parallel_2\n";
-        summ_file << "num_threads,time_serial,time_parallel_1,time_parallel_2,speedup_1,speedup_2\n";
-
-        for (size_t t_idx = 0; t_idx < num_threads.size(); t_idx++)
+      double local_sum = 0.0;
+      if (runtime_schedule)
+      {
+#pragma omp for schedule(runtime) nowait
+        for (int i = 0; i < n; ++i)
         {
-            int threads = num_threads[t_idx];
-
-            std::vector<double> serial_times(NUM_RUNS);
-            std::vector<double> parallel1_times(NUM_RUNS);
-            std::vector<double> parallel2_times(NUM_RUNS);
-
-            for (int run = 0; run < NUM_RUNS; run++)
-            {
-                serial_times[run] = run_single_measurement(solve_serial, N, 1);
-                parallel1_times[run] = run_single_measurement(solve_parallel_1, N, threads);
-                parallel2_times[run] = run_single_measurement(solve_parallel_2, N, threads);
-
-                iter_file << threads << "," << (run + 1) << ","
-                          << serial_times[run] << ","
-                          << parallel1_times[run] << ","
-                          << parallel2_times[run] << "\n";
-            }
-
-            double avg_serial = std::accumulate(serial_times.begin(), serial_times.end(), 0.0) / NUM_RUNS;
-            double avg_parallel1 = std::accumulate(parallel1_times.begin(), parallel1_times.end(), 0.0) / NUM_RUNS;
-            double avg_parallel2 = std::accumulate(parallel2_times.begin(), parallel2_times.end(), 0.0) / NUM_RUNS;
-
-            double speedup1 = avg_serial / avg_parallel1;
-            double speedup2 = avg_serial / avg_parallel2;
-
-            summ_file << threads << ","
-                      << avg_serial << ","
-                      << avg_parallel1 << ","
-                      << avg_parallel2 << ","
-                      << speedup1 << ","
-                      << speedup2 << "\n";
+          local_sum += ws.x[static_cast<std::size_t>(i)];
         }
-        std::cout << "✓ Файлы iterationData.csv и summary.csv созданы\n";
-    }
-
-    std::ofstream iter_sc("iterationData_sc.csv");
-    std::ofstream summ_sc("summary_sc.csv");
-
-    if (iter_sc && summ_sc)
-    {
-        iter_sc << "config_description,run,time_serial,time_parallel\n";
-        summ_sc << "config_description,time_serial,time_parallel,speedup\n";
-
-        for (const auto &cfg : configs)
+      }
+      else
+      {
+#pragma omp for schedule(static) nowait
+        for (int i = 0; i < n; ++i)
         {
-            omp_set_schedule(cfg.kind, cfg.chunk);
-
-            std::vector<double> serial_times(NUM_RUNS);
-            std::vector<double> parallel_times(NUM_RUNS);
-
-            for (int run = 0; run < NUM_RUNS; run++)
-            {
-                serial_times[run] = run_single_measurement(solve_serial, N, 1);
-                parallel_times[run] = run_single_measurement(solve_parallel_2, N, num_threads[4]);
-
-                iter_sc << cfg.name << "," << (run + 1) << ","
-                        << serial_times[run] << ","
-                        << parallel_times[run] << "\n";
-            }
-
-            double avg_serial = std::accumulate(serial_times.begin(), serial_times.end(), 0.0) / NUM_RUNS;
-            double avg_parallel = std::accumulate(parallel_times.begin(), parallel_times.end(), 0.0) / NUM_RUNS;
-            double speedup = avg_serial / avg_parallel;
-
-            summ_sc << cfg.name << ","
-                    << avg_serial << ","
-                    << avg_parallel << ","
-                    << speedup << "\n";
+          local_sum += ws.x[static_cast<std::size_t>(i)];
         }
-        std::cout << "✓ Файлы iterationData_sc.csv и summary_sc.csv созданы\n";
+      }
+#pragma omp atomic update
+      sum_x += local_sum;
+#pragma omp barrier
+
+      if (runtime_schedule)
+      {
+#pragma omp for schedule(runtime)
+        for (int i = 0; i < n; ++i)
+        {
+          const double ax = sum_x + ws.x[static_cast<std::size_t>(i)];
+          ws.x_new[static_cast<std::size_t>(i)] = ws.x[static_cast<std::size_t>(i)] - tau * (ax - b_value);
+        }
+      }
+      else
+      {
+#pragma omp for schedule(static)
+        for (int i = 0; i < n; ++i)
+        {
+          const double ax = sum_x + ws.x[static_cast<std::size_t>(i)];
+          ws.x_new[static_cast<std::size_t>(i)] = ws.x[static_cast<std::size_t>(i)] - tau * (ax - b_value);
+        }
+      }
+
+      double local_diff = 0.0;
+      if (runtime_schedule)
+      {
+#pragma omp for schedule(runtime) nowait
+        for (int i = 0; i < n; ++i)
+        {
+          const double d = ws.x_new[static_cast<std::size_t>(i)] - ws.x[static_cast<std::size_t>(i)];
+          local_diff += d * d;
+        }
+      }
+      else
+      {
+#pragma omp for schedule(static) nowait
+        for (int i = 0; i < n; ++i)
+        {
+          const double d = ws.x_new[static_cast<std::size_t>(i)] - ws.x[static_cast<std::size_t>(i)];
+          local_diff += d * d;
+        }
+      }
+#pragma omp atomic update
+      diff_sq += local_diff;
+#pragma omp barrier
+
+#pragma omp single
+      {
+        diff = std::sqrt(diff_sq);
+        std::swap(ws.x, ws.x_new);
+        ++iteration;
+      }
+#pragma omp barrier
+    }
+  }
+
+  return {omp_get_wtime() - start, iteration, diff, compute_error_norm(ws.x)};
+}
+
+double average_time(const std::vector<SolverResult> &results)
+{
+  double total = 0.0;
+  for (const SolverResult &result : results)
+  {
+    total += result.elapsed_sec;
+  }
+  return total / static_cast<double>(results.size());
+}
+} // namespace
+
+int main(int argc, char **argv)
+{
+  const int n = (argc > 1) ? std::stoi(argv[1]) : 20000;
+  const int max_iters = (argc > 2) ? std::stoi(argv[2]) : 5000;
+  const double eps = (argc > 3) ? std::stod(argv[3]) : 1e-6;
+  const int repeats = (argc > 4) ? std::stoi(argv[4]) : kDefaultRepeats;
+  const int schedule_threads = (argc > 5) ? std::stoi(argv[5]) : 8;
+  const double tau_factor = (argc > 6) ? std::stod(argv[6]) : 1e-3;
+
+  print_system_info();
+  std::cout << std::fixed << std::setprecision(6);
+  std::cout << "N=" << n << ", max_iters=" << max_iters << ", eps=" << eps
+            << ", repeats=" << repeats << ", tau_factor=" << tau_factor << "\n";
+
+  Workspace workspace(n);
+
+  std::ofstream runs_csv("iteration_runs.csv");
+  std::ofstream summary_csv("iteration_summary.csv");
+  if (!runs_csv || !summary_csv)
+  {
+    std::cerr << "Cannot open CSV files for writing\n";
+    return 1;
+  }
+
+  runs_csv << "variant,threads,run,time_sec,iterations,diff_norm,error_norm\n";
+  summary_csv << "variant,threads,avg_time_sec,speedup,efficiency,iterations,diff_norm,error_norm\n";
+
+  double base_v1 = 0.0;
+  double base_v2 = 0.0;
+  for (const int threads : kThreadCounts)
+  {
+    std::vector<SolverResult> v1_results;
+    std::vector<SolverResult> v2_results;
+    v1_results.reserve(static_cast<std::size_t>(repeats));
+    v2_results.reserve(static_cast<std::size_t>(repeats));
+
+    for (int run = 1; run <= repeats; ++run)
+    {
+      const SolverResult v1 = solve_variant1(workspace, n, max_iters, eps, threads, tau_factor);
+      v1_results.push_back(v1);
+      runs_csv << "variant1," << threads << "," << run << "," << v1.elapsed_sec << ","
+               << v1.iterations << "," << v1.diff_norm << "," << v1.error_norm << "\n";
+
+      const SolverResult v2 = solve_variant2(workspace, n, max_iters, eps, threads, tau_factor, false);
+      v2_results.push_back(v2);
+      runs_csv << "variant2," << threads << "," << run << "," << v2.elapsed_sec << ","
+               << v2.iterations << "," << v2.diff_norm << "," << v2.error_norm << "\n";
     }
 
-    std::cout << "\n=== ВЫВОДЫ ===\n";
+    const double avg_v1 = average_time(v1_results);
+    const double avg_v2 = average_time(v2_results);
+    if (threads == 1)
+    {
+      base_v1 = avg_v1;
+      base_v2 = avg_v2;
+    }
 
-    auto max_speedup1 = *std::max_element(speedups1.begin(), speedups1.end());
-    auto max_speedup2 = *std::max_element(speedups2.begin(), speedups2.end());
+    const SolverResult last_v1 = v1_results.back();
+    const SolverResult last_v2 = v2_results.back();
+    summary_csv << "variant1," << threads << "," << avg_v1 << ","
+                << base_v1 / avg_v1 << "," << (base_v1 / avg_v1) / threads << ","
+                << last_v1.iterations << "," << last_v1.diff_norm << "," << last_v1.error_norm << "\n";
+    summary_csv << "variant2," << threads << "," << avg_v2 << ","
+                << base_v2 / avg_v2 << "," << (base_v2 / avg_v2) / threads << ","
+                << last_v2.iterations << "," << last_v2.diff_norm << "," << last_v2.error_norm << "\n";
 
-    std::cout << "Лучшее ускорение (простое среднее):\n";
-    printf("  Алгоритм 1: %.2f\n", max_speedup1);
-    printf("  Алгоритм 2: %.2f\n", max_speedup2);
+    std::cout << "threads=" << std::setw(2) << threads
+              << " v1_avg=" << avg_v1
+              << " v2_avg=" << avg_v2 << "\n";
+  }
 
-    double efficiency2 = speedups2.back() / num_threads.back() * 100;
-    printf("\nЭффективность алгоритма 2 при %d потоках: %.1f%%\n",
-           num_threads.back(), efficiency2);
+  const int sched_threads = std::max(1, schedule_threads);
+  const std::vector<ScheduleConfig> schedules = {
+      {omp_sched_static, 1, "static,1"},
+      {omp_sched_static, 64, "static,64"},
+      {omp_sched_static, std::max(1, n / sched_threads), "static,N/T"},
+      {omp_sched_dynamic, 1, "dynamic,1"},
+      {omp_sched_dynamic, 64, "dynamic,64"},
+      {omp_sched_dynamic, std::max(1, n / sched_threads), "dynamic,N/T"},
+      {omp_sched_guided, 1, "guided,1"},
+      {omp_sched_guided, 64, "guided,64"},
+      {omp_sched_guided, std::max(1, n / sched_threads), "guided,N/T"}};
 
-    if (efficiency2 > 80)
-        std::cout << "✓ Отличная масштабируемость\n";
-    else if (efficiency2 > 50)
-        std::cout << "✓ Хорошая масштабируемость\n";
-    else
-        std::cout << "✓ Удовлетворительная масштабируемость\n";
+  std::ofstream schedule_runs_csv("iteration_schedule_runs.csv");
+  std::ofstream schedule_summary_csv("iteration_schedule_summary.csv");
+  if (!schedule_runs_csv || !schedule_summary_csv)
+  {
+    std::cerr << "Cannot open schedule CSV files for writing\n";
+    return 1;
+  }
 
-    return 0;
+  schedule_runs_csv << "schedule,threads,run,time_sec,iterations,diff_norm,error_norm\n";
+  schedule_summary_csv << "schedule,threads,avg_time_sec,speedup,iterations,diff_norm,error_norm\n";
+
+  double best_schedule_time = std::numeric_limits<double>::max();
+  const char *best_schedule = "";
+  for (const ScheduleConfig &cfg : schedules)
+  {
+    omp_set_schedule(cfg.kind, cfg.chunk);
+    std::vector<SolverResult> results;
+    results.reserve(static_cast<std::size_t>(repeats));
+
+    for (int run = 1; run <= repeats; ++run)
+    {
+      const SolverResult result = solve_variant2(workspace, n, max_iters, eps, sched_threads, tau_factor, true);
+      results.push_back(result);
+      schedule_runs_csv << cfg.name << "," << sched_threads << "," << run << ","
+                        << result.elapsed_sec << "," << result.iterations << ","
+                        << result.diff_norm << "," << result.error_norm << "\n";
+    }
+
+    const double avg = average_time(results);
+    const SolverResult last = results.back();
+    schedule_summary_csv << cfg.name << "," << sched_threads << "," << avg << ","
+                         << base_v2 / avg << "," << last.iterations << ","
+                         << last.diff_norm << "," << last.error_norm << "\n";
+
+    if (avg < best_schedule_time)
+    {
+      best_schedule_time = avg;
+      best_schedule = cfg.name;
+    }
+  }
+
+  std::cout << "\nBest schedule for variant2 with " << sched_threads
+            << " threads: " << best_schedule << ", " << best_schedule_time << " sec\n";
+  std::cout << "Saved: iteration_runs.csv, iteration_summary.csv, "
+            << "iteration_schedule_runs.csv, iteration_schedule_summary.csv\n";
+  return 0;
 }
