@@ -13,6 +13,8 @@ namespace
 {
 constexpr int kNsteps = 40000000;
 constexpr int kDefaultRepeats = 50;
+constexpr double kIntervalStart = -4.0;
+constexpr double kIntervalEnd = 4.0;
 const std::vector<int> kThreadCounts = {1, 2, 4, 7, 8, 16, 20, 40};
 
 void print_system_info()
@@ -25,14 +27,9 @@ void print_system_info()
   std::cout << "=====================================\n\n";
 }
 
-double economic_profit_flow(double year)
+double target_function(double x)
 {
-  constexpr double pi = 3.14159265358979323846;
-  const double demand = 120000.0 * (1.0 + 0.15 * std::sin(2.0 * pi * year));
-  const double price = 90.0 + 10.0 * std::cos(2.0 * pi * year);
-  const double unit_cost = 45.0;
-  const double discount = std::exp(-0.08 * year);
-  return (price - unit_cost) * demand * discount;
+  return std::exp(-x * x);
 }
 
 double integrate_serial(double (*func)(double), double a, double b, int nsteps)
@@ -80,14 +77,14 @@ struct Measurement
 Measurement measure_serial()
 {
   const double start = omp_get_wtime();
-  const double value = integrate_serial(economic_profit_flow, 0.0, 4.0, kNsteps);
+  const double value = integrate_serial(target_function, kIntervalStart, kIntervalEnd, kNsteps);
   return {omp_get_wtime() - start, value};
 }
 
 Measurement measure_parallel(int threads)
 {
   const double start = omp_get_wtime();
-  const double value = integrate_omp(economic_profit_flow, 0.0, 4.0, kNsteps, threads);
+  const double value = integrate_omp(target_function, kIntervalStart, kIntervalEnd, kNsteps, threads);
   return {omp_get_wtime() - start, value};
 }
 } // namespace
@@ -98,7 +95,8 @@ int main(int argc, char **argv)
 
   print_system_info();
   std::cout << std::fixed << std::setprecision(6);
-  std::cout << "Экономическая задача: дисконтированная прибыль за 4 года\n";
+  std::cout << "Интегрирование функции exp(-x*x) на отрезке ["
+            << kIntervalStart << ", " << kIntervalEnd << "]\n";
   std::cout << "nsteps=" << kNsteps << ", запусков=" << repeats << "\n";
 
   std::ofstream runs_csv("integration_runs.csv");
@@ -130,6 +128,10 @@ int main(int argc, char **argv)
   double best_time = std::numeric_limits<double>::max();
   int best_threads = 1;
   double best_speedup = 1.0;
+  double best_efficiency = 0.0;
+  int best_efficiency_threads = 1;
+  double best_efficiency_time = serial_avg;
+  double best_efficiency_speedup = 1.0;
 
   for (const int threads : kThreadCounts)
   {
@@ -158,6 +160,13 @@ int main(int argc, char **argv)
       best_threads = threads;
       best_speedup = speedup;
     }
+    if (threads > 1 && efficiency > best_efficiency)
+    {
+      best_efficiency = efficiency;
+      best_efficiency_threads = threads;
+      best_efficiency_time = avg_time;
+      best_efficiency_speedup = speedup;
+    }
 
     std::cout << "threads=" << std::setw(2) << threads
               << " avg=" << avg_time
@@ -165,8 +174,13 @@ int main(int argc, char **argv)
               << " efficiency=" << efficiency << "\n";
   }
 
-  std::cout << "\nЛучший режим: " << best_threads << " потоков, среднее время "
-            << best_time << " сек, ускорение " << best_speedup << "\n";
+  std::cout << "\nМинимальное время / максимальная скорость: " << best_threads
+            << " потоков, среднее время " << best_time
+            << " сек, ускорение " << best_speedup << "\n";
+  std::cout << "Максимальный КПД среди параллельных запусков: " << best_efficiency_threads
+            << " потоков, среднее время " << best_efficiency_time
+            << " сек, ускорение " << best_efficiency_speedup
+            << ", КПД " << best_efficiency << "\n";
   std::cout << "Сохранено: integration_runs.csv, integration_summary.csv\n";
   return 0;
 }
