@@ -13,231 +13,231 @@
 
 namespace
 {
-constexpr int kDefaultRepeats = 50;
-const std::vector<int> kThreadCounts = {1, 2, 4, 7, 8, 16, 20, 40};
+  constexpr int kDefaultRepeats = 300;
+  const std::vector<int> kThreadCounts = {1, 2, 4, 7, 8, 16, 20, 40};
 
-struct SolverResult
-{
-  double elapsed_sec = 0.0;
-  int iterations = 0;
-  double diff_norm = 0.0;
-  double error_norm = 0.0;
-};
-
-struct Workspace
-{
-  std::vector<double> x;
-  std::vector<double> x_new;
-
-  explicit Workspace(int n)
-      : x(static_cast<std::size_t>(n)),
-        x_new(static_cast<std::size_t>(n))
+  struct SolverResult
   {
-  }
+    double elapsed_sec = 0.0;
+    int iterations = 0;
+    double diff_norm = 0.0;
+    double error_norm = 0.0;
+  };
 
-  void reset(int n)
+  struct Workspace
   {
-#pragma omp parallel for schedule(static)
-    for (int i = 0; i < n; ++i)
+    std::vector<double> x;
+    std::vector<double> x_new;
+
+    explicit Workspace(int n)
+        : x(static_cast<std::size_t>(n)),
+          x_new(static_cast<std::size_t>(n))
     {
-      x[static_cast<std::size_t>(i)] = 0.0;
-      x_new[static_cast<std::size_t>(i)] = 0.0;
     }
+
+    void reset(int n)
+    {
+#pragma omp parallel for schedule(static)
+      for (int i = 0; i < n; ++i)
+      {
+        x[static_cast<std::size_t>(i)] = 0.0;
+        x_new[static_cast<std::size_t>(i)] = 0.0;
+      }
+    }
+  };
+
+  struct ScheduleConfig
+  {
+    omp_sched_t kind;
+    int chunk;
+    const char *name;
+  };
+
+  void print_system_info()
+  {
+    std::cout << "\n=== System information ===\n";
+    std::system("lscpu | grep 'Model name'");
+    std::system("cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo 'N/A'");
+    std::system("numactl --hardware 2>/dev/null | grep -E 'available|node [0-9]+ size' || echo 'NUMA info not available'");
+    std::system("cat /etc/os-release 2>/dev/null | grep 'PRETTY_NAME' | cut -d'=' -f2 | tr -d '\"'");
+    std::cout << "=====================================\n\n";
   }
-};
 
-struct ScheduleConfig
-{
-  omp_sched_t kind;
-  int chunk;
-  const char *name;
-};
-
-void print_system_info()
-{
-  std::cout << "\n=== System information ===\n";
-  std::system("lscpu | grep 'Model name'");
-  std::system("cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo 'N/A'");
-  std::system("numactl --hardware 2>/dev/null | grep -E 'available|node [0-9]+ size' || echo 'NUMA info not available'");
-  std::system("cat /etc/os-release 2>/dev/null | grep 'PRETTY_NAME' | cut -d'=' -f2 | tr -d '\"'");
-  std::cout << "=====================================\n\n";
-}
-
-double compute_error_norm(const std::vector<double> &x)
-{
-  double err = 0.0;
+  double compute_error_norm(const std::vector<double> &x)
+  {
+    double err = 0.0;
 #pragma omp parallel for reduction(+ : err) schedule(static)
-  for (int i = 0; i < static_cast<int>(x.size()); ++i)
-  {
-    const double d = x[static_cast<std::size_t>(i)] - 1.0;
-    err += d * d;
-  }
-  return std::sqrt(err);
-}
-
-SolverResult solve_variant1(Workspace &ws, int n, int max_iters, double eps, int threads, double tau_factor)
-{
-  ws.reset(n);
-  omp_set_num_threads(threads);
-
-  const double b_value = static_cast<double>(n + 1);
-  const double tau = tau_factor / b_value;
-  double diff = std::numeric_limits<double>::infinity();
-  int iteration = 0;
-  const double start = omp_get_wtime();
-
-  while (iteration < max_iters && diff > eps)
-  {
-    double sum_x = 0.0;
-#pragma omp parallel for reduction(+ : sum_x) schedule(static)
-    for (int i = 0; i < n; ++i)
+    for (int i = 0; i < static_cast<int>(x.size()); ++i)
     {
-      sum_x += ws.x[static_cast<std::size_t>(i)];
+      const double d = x[static_cast<std::size_t>(i)] - 1.0;
+      err += d * d;
     }
+    return std::sqrt(err);
+  }
+
+  SolverResult solve_variant1(Workspace &ws, int n, int max_iters, double eps, int threads, double tau_factor)
+  {
+    ws.reset(n);
+    omp_set_num_threads(threads);
+
+    const double b_value = static_cast<double>(n + 1);
+    const double tau = tau_factor / b_value;
+    double diff = std::numeric_limits<double>::infinity();
+    int iteration = 0;
+    const double start = omp_get_wtime();
+
+    while (iteration < max_iters && diff > eps)
+    {
+      double sum_x = 0.0;
+#pragma omp parallel for reduction(+ : sum_x) schedule(static)
+      for (int i = 0; i < n; ++i)
+      {
+        sum_x += ws.x[static_cast<std::size_t>(i)];
+      }
 
 #pragma omp parallel for schedule(static)
-    for (int i = 0; i < n; ++i)
-    {
-      const double ax = sum_x + ws.x[static_cast<std::size_t>(i)];
-      ws.x_new[static_cast<std::size_t>(i)] = ws.x[static_cast<std::size_t>(i)] - tau * (ax - b_value);
+      for (int i = 0; i < n; ++i)
+      {
+        const double ax = sum_x + ws.x[static_cast<std::size_t>(i)];
+        ws.x_new[static_cast<std::size_t>(i)] = ws.x[static_cast<std::size_t>(i)] - tau * (ax - b_value);
+      }
+
+      diff = 0.0;
+#pragma omp parallel for reduction(+ : diff) schedule(static)
+      for (int i = 0; i < n; ++i)
+      {
+        const double d = ws.x_new[static_cast<std::size_t>(i)] - ws.x[static_cast<std::size_t>(i)];
+        diff += d * d;
+      }
+      diff = std::sqrt(diff);
+      std::swap(ws.x, ws.x_new);
+      ++iteration;
     }
 
-    diff = 0.0;
-#pragma omp parallel for reduction(+ : diff) schedule(static)
-    for (int i = 0; i < n; ++i)
-    {
-      const double d = ws.x_new[static_cast<std::size_t>(i)] - ws.x[static_cast<std::size_t>(i)];
-      diff += d * d;
-    }
-    diff = std::sqrt(diff);
-    std::swap(ws.x, ws.x_new);
-    ++iteration;
+    return {omp_get_wtime() - start, iteration, diff, compute_error_norm(ws.x)};
   }
 
-  return {omp_get_wtime() - start, iteration, diff, compute_error_norm(ws.x)};
-}
+  SolverResult solve_variant2(Workspace &ws,
+                              int n,
+                              int max_iters,
+                              double eps,
+                              int threads,
+                              double tau_factor,
+                              bool runtime_schedule)
+  {
+    ws.reset(n);
+    omp_set_num_threads(threads);
 
-SolverResult solve_variant2(Workspace &ws,
-                            int n,
-                            int max_iters,
-                            double eps,
-                            int threads,
-                            double tau_factor,
-                            bool runtime_schedule)
-{
-  ws.reset(n);
-  omp_set_num_threads(threads);
-
-  const double b_value = static_cast<double>(n + 1);
-  const double tau = tau_factor / b_value;
-  double diff = std::numeric_limits<double>::infinity();
-  double sum_x = 0.0;
-  double diff_sq = 0.0;
-  int iteration = 0;
-  bool stop = false;
-  const double start = omp_get_wtime();
+    const double b_value = static_cast<double>(n + 1);
+    const double tau = tau_factor / b_value;
+    double diff = std::numeric_limits<double>::infinity();
+    double sum_x = 0.0;
+    double diff_sq = 0.0;
+    int iteration = 0;
+    bool stop = false;
+    const double start = omp_get_wtime();
 
 #pragma omp parallel shared(ws, diff, sum_x, diff_sq, iteration, stop)
-  {
-    while (true)
     {
+      while (true)
+      {
 #pragma omp single
-      {
-        stop = (iteration >= max_iters || diff <= eps);
-        sum_x = 0.0;
-        diff_sq = 0.0;
-      }
+        {
+          stop = (iteration >= max_iters || diff <= eps);
+          sum_x = 0.0;
+          diff_sq = 0.0;
+        }
 #pragma omp barrier
-      if (stop)
-      {
-        break;
-      }
+        if (stop)
+        {
+          break;
+        }
 
-      double local_sum = 0.0;
-      if (runtime_schedule)
-      {
+        double local_sum = 0.0;
+        if (runtime_schedule)
+        {
 #pragma omp for schedule(runtime) nowait
-        for (int i = 0; i < n; ++i)
-        {
-          local_sum += ws.x[static_cast<std::size_t>(i)];
+          for (int i = 0; i < n; ++i)
+          {
+            local_sum += ws.x[static_cast<std::size_t>(i)];
+          }
         }
-      }
-      else
-      {
+        else
+        {
 #pragma omp for schedule(static) nowait
-        for (int i = 0; i < n; ++i)
-        {
-          local_sum += ws.x[static_cast<std::size_t>(i)];
+          for (int i = 0; i < n; ++i)
+          {
+            local_sum += ws.x[static_cast<std::size_t>(i)];
+          }
         }
-      }
 #pragma omp atomic update
-      sum_x += local_sum;
+        sum_x += local_sum;
 #pragma omp barrier
 
-      if (runtime_schedule)
-      {
+        if (runtime_schedule)
+        {
 #pragma omp for schedule(runtime)
-        for (int i = 0; i < n; ++i)
-        {
-          const double ax = sum_x + ws.x[static_cast<std::size_t>(i)];
-          ws.x_new[static_cast<std::size_t>(i)] = ws.x[static_cast<std::size_t>(i)] - tau * (ax - b_value);
+          for (int i = 0; i < n; ++i)
+          {
+            const double ax = sum_x + ws.x[static_cast<std::size_t>(i)];
+            ws.x_new[static_cast<std::size_t>(i)] = ws.x[static_cast<std::size_t>(i)] - tau * (ax - b_value);
+          }
         }
-      }
-      else
-      {
+        else
+        {
 #pragma omp for schedule(static)
-        for (int i = 0; i < n; ++i)
-        {
-          const double ax = sum_x + ws.x[static_cast<std::size_t>(i)];
-          ws.x_new[static_cast<std::size_t>(i)] = ws.x[static_cast<std::size_t>(i)] - tau * (ax - b_value);
+          for (int i = 0; i < n; ++i)
+          {
+            const double ax = sum_x + ws.x[static_cast<std::size_t>(i)];
+            ws.x_new[static_cast<std::size_t>(i)] = ws.x[static_cast<std::size_t>(i)] - tau * (ax - b_value);
+          }
         }
-      }
 
-      double local_diff = 0.0;
-      if (runtime_schedule)
-      {
+        double local_diff = 0.0;
+        if (runtime_schedule)
+        {
 #pragma omp for schedule(runtime) nowait
-        for (int i = 0; i < n; ++i)
-        {
-          const double d = ws.x_new[static_cast<std::size_t>(i)] - ws.x[static_cast<std::size_t>(i)];
-          local_diff += d * d;
+          for (int i = 0; i < n; ++i)
+          {
+            const double d = ws.x_new[static_cast<std::size_t>(i)] - ws.x[static_cast<std::size_t>(i)];
+            local_diff += d * d;
+          }
         }
-      }
-      else
-      {
+        else
+        {
 #pragma omp for schedule(static) nowait
-        for (int i = 0; i < n; ++i)
-        {
-          const double d = ws.x_new[static_cast<std::size_t>(i)] - ws.x[static_cast<std::size_t>(i)];
-          local_diff += d * d;
+          for (int i = 0; i < n; ++i)
+          {
+            const double d = ws.x_new[static_cast<std::size_t>(i)] - ws.x[static_cast<std::size_t>(i)];
+            local_diff += d * d;
+          }
         }
-      }
 #pragma omp atomic update
-      diff_sq += local_diff;
+        diff_sq += local_diff;
 #pragma omp barrier
 
 #pragma omp single
-      {
-        diff = std::sqrt(diff_sq);
-        std::swap(ws.x, ws.x_new);
-        ++iteration;
-      }
+        {
+          diff = std::sqrt(diff_sq);
+          std::swap(ws.x, ws.x_new);
+          ++iteration;
+        }
 #pragma omp barrier
+      }
     }
+
+    return {omp_get_wtime() - start, iteration, diff, compute_error_norm(ws.x)};
   }
 
-  return {omp_get_wtime() - start, iteration, diff, compute_error_norm(ws.x)};
-}
-
-double average_time(const std::vector<SolverResult> &results)
-{
-  double total = 0.0;
-  for (const SolverResult &result : results)
+  double average_time(const std::vector<SolverResult> &results)
   {
-    total += result.elapsed_sec;
+    double total = 0.0;
+    for (const SolverResult &result : results)
+    {
+      total += result.elapsed_sec;
+    }
+    return total / static_cast<double>(results.size());
   }
-  return total / static_cast<double>(results.size());
-}
 } // namespace
 
 int main(int argc, char **argv)

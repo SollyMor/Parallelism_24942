@@ -13,74 +13,74 @@
 
 namespace
 {
-constexpr int kDefaultRepeats = 50;
-const std::vector<int> kThreadCounts = {1, 2, 4, 7, 8, 16, 20, 40};
-const std::vector<int> kMatrixSizes = {20000, 40000};
+  constexpr int kDefaultRepeats = 300;
+  const std::vector<int> kThreadCounts = {1, 2, 4, 7, 8, 16, 20, 40};
+  const std::vector<int> kMatrixSizes = {20000, 40000};
 
-void print_system_info()
-{
-  std::cout << "\n=== Информация о вычислительном узле ===\n";
-  std::system("lscpu | grep 'Model name'");
-  std::system("cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo 'N/A'");
-  std::system("numactl --hardware 2>/dev/null | grep -E 'available|node [0-9]+ size' || echo 'NUMA info not available'");
-  std::system("cat /etc/os-release 2>/dev/null | grep 'PRETTY_NAME' | cut -d'=' -f2 | tr -d '\"'");
-  std::cout << "=====================================\n\n";
-}
-
-void init_data(std::vector<double> &matrix, std::vector<double> &x, int n)
-{
-  const std::size_t total = static_cast<std::size_t>(n) * static_cast<std::size_t>(n);
-
-#pragma omp parallel for schedule(static)
-  for (std::int64_t idx = 0; idx < static_cast<std::int64_t>(total); ++idx)
+  void print_system_info()
   {
-    const int row = static_cast<int>(idx / n);
-    const int col = static_cast<int>(idx - static_cast<std::int64_t>(row) * n);
-    matrix[static_cast<std::size_t>(idx)] = 1.0 + 0.000001 * static_cast<double>((row + col) % 100);
+    std::cout << "\n=== Информация о вычислительном узле ===\n";
+    std::system("lscpu | grep 'Model name'");
+    std::system("cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo 'N/A'");
+    std::system("numactl --hardware 2>/dev/null | grep -E 'available|node [0-9]+ size' || echo 'NUMA info not available'");
+    std::system("cat /etc/os-release 2>/dev/null | grep 'PRETTY_NAME' | cut -d'=' -f2 | tr -d '\"'");
+    std::cout << "=====================================\n\n";
   }
 
-#pragma omp parallel for schedule(static)
-  for (int i = 0; i < n; ++i)
+  void init_data(std::vector<double> &matrix, std::vector<double> &x, int n)
   {
-    x[i] = 1.0 + 0.00001 * static_cast<double>(i % 100);
-  }
-}
-
-double multiply_matrix_vector(const std::vector<double> &matrix,
-                              const std::vector<double> &x,
-                              std::vector<double> &y,
-                              int n,
-                              int threads)
-{
-  omp_set_num_threads(threads);
-  const double start = omp_get_wtime();
+    const std::size_t total = static_cast<std::size_t>(n) * static_cast<std::size_t>(n);
 
 #pragma omp parallel for schedule(static)
-  for (int i = 0; i < n; ++i)
-  {
-    const double *row = matrix.data() + static_cast<std::size_t>(i) * static_cast<std::size_t>(n);
-    double sum = 0.0;
-    for (int j = 0; j < n; ++j)
+    for (std::int64_t idx = 0; idx < static_cast<std::int64_t>(total); ++idx)
     {
-      sum += row[j] * x[j];
+      const int row = static_cast<int>(idx / n);
+      const int col = static_cast<int>(idx - static_cast<std::int64_t>(row) * n);
+      matrix[static_cast<std::size_t>(idx)] = 1.0 + 0.000001 * static_cast<double>((row + col) % 100);
     }
-    y[i] = sum;
+
+#pragma omp parallel for schedule(static)
+    for (int i = 0; i < n; ++i)
+    {
+      x[i] = 1.0 + 0.00001 * static_cast<double>(i % 100);
+    }
   }
 
-  return omp_get_wtime() - start;
-}
-
-double checksum(const std::vector<double> &y)
-{
-  double sum = 0.0;
-#pragma omp parallel for reduction(+ : sum) schedule(static)
-  for (std::int64_t i = 0; i < static_cast<std::int64_t>(y.size()); ++i)
+  double multiply_matrix_vector(const std::vector<double> &matrix,
+                                const std::vector<double> &x,
+                                std::vector<double> &y,
+                                int n,
+                                int threads)
   {
-    sum += y[static_cast<std::size_t>(i)];
+    omp_set_num_threads(threads);
+    const double start = omp_get_wtime();
+
+#pragma omp parallel for schedule(static)
+    for (int i = 0; i < n; ++i)
+    {
+      const double *row = matrix.data() + static_cast<std::size_t>(i) * static_cast<std::size_t>(n);
+      double sum = 0.0;
+      for (int j = 0; j < n; ++j)
+      {
+        sum += row[j] * x[j];
+      }
+      y[i] = sum;
+    }
+
+    return omp_get_wtime() - start;
   }
-  return sum;
+
+  double checksum(const std::vector<double> &y)
+  {
+    double sum = 0.0;
+#pragma omp parallel for reduction(+ : sum) schedule(static)
+    for (std::int64_t i = 0; i < static_cast<std::int64_t>(y.size()); ++i)
+    {
+      sum += y[static_cast<std::size_t>(i)];
+    }
+    return sum;
+  }
 }
-} 
 
 int main(int argc, char **argv)
 {
@@ -160,4 +160,3 @@ int main(int argc, char **argv)
   std::cout << "\nСохранено: matrix_vector_runs.csv, matrix_vector_summary.csv\n";
   return 0;
 }
-

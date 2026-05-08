@@ -2,7 +2,11 @@ CMakeFiles/integral.dir/integral.cpp.o : \
   /home/s.morozova/Parallelism_24942/2\ task/integral/integral.cpp \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/_cplus_macros.h \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/_cplus_preinclude.h \
-  /usr/include/stdio.h /usr/include/x86_64-linux-gnu/bits/libc-header-start.h \
+  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/cmath \
+  /usr/include/c++/11/cmath \
+  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
+  /usr/include/x86_64-linux-gnu/c++/11/bits/c++config.h \
+  /usr/include/x86_64-linux-gnu/c++/11/bits/os_defines.h \
   /usr/include/features.h /usr/include/features-time64.h \
   /usr/include/x86_64-linux-gnu/bits/wordsize.h \
   /usr/include/x86_64-linux-gnu/bits/timesize.h \
@@ -12,33 +16,6 @@ CMakeFiles/integral.dir/integral.cpp.o : \
   /usr/include/x86_64-linux-gnu/bits/long-double.h \
   /usr/include/x86_64-linux-gnu/gnu/stubs.h \
   /usr/include/x86_64-linux-gnu/gnu/stubs-64.h \
-  /usr/lib/gcc/x86_64-linux-gnu/11/include/stddef.h \
-  /usr/lib/gcc/x86_64-linux-gnu/11/include/stdarg.h \
-  /usr/include/x86_64-linux-gnu/bits/types.h \
-  /usr/include/x86_64-linux-gnu/bits/wordsize.h \
-  /usr/include/x86_64-linux-gnu/bits/timesize.h \
-  /usr/include/x86_64-linux-gnu/bits/wordsize.h \
-  /usr/include/x86_64-linux-gnu/bits/typesizes.h \
-  /usr/include/x86_64-linux-gnu/bits/time64.h \
-  /usr/include/x86_64-linux-gnu/bits/types/__fpos_t.h \
-  /usr/include/x86_64-linux-gnu/bits/types/__mbstate_t.h \
-  /usr/include/x86_64-linux-gnu/bits/types/__fpos64_t.h \
-  /usr/include/x86_64-linux-gnu/bits/types/__FILE.h \
-  /usr/include/x86_64-linux-gnu/bits/types/FILE.h \
-  /usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h \
-  /usr/include/x86_64-linux-gnu/bits/types/cookie_io_functions_t.h \
-  /usr/include/x86_64-linux-gnu/bits/stdio_lim.h \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/floatn.h \
-  /usr/include/x86_64-linux-gnu/bits/floatn.h \
-  /usr/include/x86_64-linux-gnu/bits/floatn-common.h \
-  /usr/include/x86_64-linux-gnu/bits/long-double.h \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/math.h \
-  /usr/include/c++/11/math.h \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/cmath \
-  /usr/include/c++/11/cmath \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
-  /usr/include/x86_64-linux-gnu/c++/11/bits/c++config.h \
-  /usr/include/x86_64-linux-gnu/c++/11/bits/os_defines.h \
   /usr/include/x86_64-linux-gnu/c++/11/bits/cpu_defines.h \
   /usr/include/c++/11/pstl/pstl_config.h \
   /usr/include/c++/11/bits/cpp_type_traits.h \
@@ -46,8 +23,18 @@ CMakeFiles/integral.dir/integral.cpp.o : \
   /usr/include/c++/11/ext/type_traits.h \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
   /usr/include/math.h /usr/include/x86_64-linux-gnu/bits/libc-header-start.h \
+  /usr/include/x86_64-linux-gnu/bits/types.h \
+  /usr/include/x86_64-linux-gnu/bits/wordsize.h \
+  /usr/include/x86_64-linux-gnu/bits/timesize.h \
+  /usr/include/x86_64-linux-gnu/bits/wordsize.h \
+  /usr/include/x86_64-linux-gnu/bits/typesizes.h \
+  /usr/include/x86_64-linux-gnu/bits/time64.h \
   /usr/include/x86_64-linux-gnu/bits/math-vector.h \
   /usr/include/x86_64-linux-gnu/bits/libm-simd-decl-stubs.h \
+  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/floatn.h \
+  /usr/include/x86_64-linux-gnu/bits/floatn.h \
+  /usr/include/x86_64-linux-gnu/bits/floatn-common.h \
+  /usr/include/x86_64-linux-gnu/bits/long-double.h \
   /usr/include/x86_64-linux-gnu/bits/flt-eval-method.h \
   /usr/include/x86_64-linux-gnu/bits/fp-logb.h \
   /usr/include/x86_64-linux-gnu/bits/fp-fast.h \
@@ -153,17 +140,11 @@ CMakeFiles/integral.dir/integral.cpp.o : \
   /usr/include/c++/11/tr1/poly_laguerre.tcc \
   /usr/include/c++/11/tr1/riemann_zeta.tcc \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/tr1/special_function_util.h \
-  /usr/include/time.h /usr/lib/gcc/x86_64-linux-gnu/11/include/stddef.h \
-  /usr/include/x86_64-linux-gnu/bits/time.h \
-  /usr/include/x86_64-linux-gnu/bits/timex.h \
-  /usr/include/x86_64-linux-gnu/bits/types/struct_tm.h \
-  /usr/include/x86_64-linux-gnu/bits/types/struct_itimerspec.h \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/omp.h \
-  /usr/lib/gcc/x86_64-linux-gnu/11/include/stddef.h \
-  /usr/include/c++/11/iostream \
+  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/cstdlib \
+  /usr/include/c++/11/cstdlib \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
-  /usr/include/c++/11/ostream /usr/include/c++/11/ios \
-  /usr/include/c++/11/iosfwd \
+  /usr/include/c++/11/fstream /usr/include/c++/11/istream \
+  /usr/include/c++/11/ios /usr/include/c++/11/iosfwd \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
   /usr/include/c++/11/bits/stringfwd.h \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
@@ -177,6 +158,9 @@ CMakeFiles/integral.dir/integral.cpp.o : \
   /usr/include/x86_64-linux-gnu/bits/wchar.h \
   /usr/include/x86_64-linux-gnu/bits/types/wint_t.h \
   /usr/include/x86_64-linux-gnu/bits/types/mbstate_t.h \
+  /usr/include/x86_64-linux-gnu/bits/types/__mbstate_t.h \
+  /usr/include/x86_64-linux-gnu/bits/types/__FILE.h \
+  /usr/include/x86_64-linux-gnu/bits/types/FILE.h \
   /usr/include/c++/11/exception \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
   /usr/include/c++/11/bits/exception.h \
@@ -217,7 +201,12 @@ CMakeFiles/integral.dir/integral.cpp.o : \
   /usr/lib/gcc/x86_64-linux-gnu/11/include/stddef.h \
   /usr/include/x86_64-linux-gnu/bits/sched.h \
   /usr/include/x86_64-linux-gnu/bits/types/struct_sched_param.h \
-  /usr/include/x86_64-linux-gnu/bits/cpu-set.h \
+  /usr/include/x86_64-linux-gnu/bits/cpu-set.h /usr/include/time.h \
+  /usr/lib/gcc/x86_64-linux-gnu/11/include/stddef.h \
+  /usr/include/x86_64-linux-gnu/bits/time.h \
+  /usr/include/x86_64-linux-gnu/bits/timex.h \
+  /usr/include/x86_64-linux-gnu/bits/types/struct_tm.h \
+  /usr/include/x86_64-linux-gnu/bits/types/struct_itimerspec.h \
   /usr/include/x86_64-linux-gnu/bits/setjmp.h \
   /usr/include/x86_64-linux-gnu/bits/wordsize.h \
   /usr/include/x86_64-linux-gnu/bits/wordsize.h \
@@ -246,14 +235,18 @@ CMakeFiles/integral.dir/integral.cpp.o : \
   /usr/include/c++/11/bits/string_view.tcc \
   /usr/include/c++/11/ext/string_conversions.h \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/cstdlib \
-  /usr/include/c++/11/cstdlib \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
   /usr/include/c++/11/cwchar \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
   /usr/include/c++/11/cstdio \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
-  /usr/include/c++/11/cerrno \
+  /usr/include/stdio.h /usr/include/x86_64-linux-gnu/bits/libc-header-start.h \
+  /usr/lib/gcc/x86_64-linux-gnu/11/include/stddef.h \
+  /usr/lib/gcc/x86_64-linux-gnu/11/include/stdarg.h \
+  /usr/include/x86_64-linux-gnu/bits/types/__fpos_t.h \
+  /usr/include/x86_64-linux-gnu/bits/types/__fpos64_t.h \
+  /usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h \
+  /usr/include/x86_64-linux-gnu/bits/types/cookie_io_functions_t.h \
+  /usr/include/x86_64-linux-gnu/bits/stdio_lim.h /usr/include/c++/11/cerrno \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
   /usr/include/errno.h /usr/include/x86_64-linux-gnu/bits/errno.h \
   /usr/include/linux/errno.h /usr/include/x86_64-linux-gnu/asm/errno.h \
@@ -279,8 +272,18 @@ CMakeFiles/integral.dir/integral.cpp.o : \
   /usr/include/c++/11/bits/streambuf_iterator.h \
   /usr/include/x86_64-linux-gnu/c++/11/bits/ctype_inline.h \
   /usr/include/c++/11/bits/locale_facets.tcc \
-  /usr/include/c++/11/bits/basic_ios.tcc /usr/include/c++/11/bits/ostream.tcc \
-  /usr/include/c++/11/istream /usr/include/c++/11/bits/istream.tcc \
+  /usr/include/c++/11/bits/basic_ios.tcc /usr/include/c++/11/ostream \
+  /usr/include/c++/11/bits/ostream.tcc /usr/include/c++/11/bits/istream.tcc \
+  /usr/include/c++/11/bits/codecvt.h \
+  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
+  /usr/include/c++/11/cstdio \
+  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
+  /usr/include/x86_64-linux-gnu/c++/11/bits/basic_file.h \
+  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
+  /usr/include/x86_64-linux-gnu/c++/11/bits/c++io.h /usr/include/c++/11/cstdio \
+  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
+  /usr/include/c++/11/bits/fstream.tcc /usr/include/c++/11/cerrno \
+  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
   /usr/include/c++/11/iomanip \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
   /usr/include/c++/11/locale /usr/include/c++/11/bits/locale_facets_nonio.h \
@@ -288,9 +291,7 @@ CMakeFiles/integral.dir/integral.cpp.o : \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
   /usr/include/x86_64-linux-gnu/c++/11/bits/time_members.h \
   /usr/include/x86_64-linux-gnu/c++/11/bits/messages_members.h \
-  /usr/include/libintl.h /usr/include/c++/11/bits/codecvt.h \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
-  /usr/include/c++/11/bits/locale_facets_nonio.tcc \
+  /usr/include/libintl.h /usr/include/c++/11/bits/locale_facets_nonio.tcc \
   /usr/include/c++/11/bits/locale_conv.h /usr/include/c++/11/bits/unique_ptr.h \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
   /usr/include/c++/11/utility \
@@ -300,37 +301,10 @@ CMakeFiles/integral.dir/integral.cpp.o : \
   /usr/include/c++/11/bits/invoke.h /usr/include/c++/11/bits/quoted_string.h \
   /usr/include/c++/11/sstream \
   /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/alloc_traits.h \
-  /usr/include/c++/11/bits/sstream.tcc /usr/include/c++/11/vector \
-  /usr/include/c++/11/bits/stl_uninitialized.h \
+  /usr/include/c++/11/bits/sstream.tcc /usr/include/c++/11/iostream \
+  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
+  /usr/include/c++/11/vector /usr/include/c++/11/bits/stl_uninitialized.h \
   /usr/include/c++/11/bits/stl_vector.h /usr/include/c++/11/bits/stl_bvector.h \
   /usr/include/c++/11/bits/vector.tcc \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/algorithm \
-  /usr/include/c++/11/algorithm /usr/include/c++/11/bits/stl_algo.h \
-  /usr/include/c++/11/bits/algorithmfwd.h \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
-  /usr/include/c++/11/bits/stl_heap.h /usr/include/c++/11/bits/stl_tempbuf.h \
-  /usr/include/c++/11/bits/uniform_int_dist.h \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/pstl/glue_algorithm_defs.h \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/nvhpc/pstl_config.hpp \
-  /usr/include/c++/11/pstl/glue_algorithm_defs.h \
-  /usr/include/c++/11/functional \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
-  /usr/include/c++/11/bits/refwrap.h /usr/include/c++/11/bits/std_function.h \
-  /usr/include/c++/11/unordered_map /usr/include/c++/11/ext/aligned_buffer.h \
-  /usr/include/c++/11/bits/hashtable.h \
-  /usr/include/c++/11/bits/hashtable_policy.h \
-  /usr/include/c++/11/bits/enable_special_members.h \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
-  /usr/include/c++/11/bits/node_handle.h \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/alloc_traits.h \
-  /usr/include/c++/11/bits/unordered_map.h /usr/include/c++/11/bits/erase_if.h \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
-  /usr/include/c++/11/pstl/execution_defs.h /usr/include/c++/11/fstream \
-  /usr/include/c++/11/cstdio \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
-  /usr/include/x86_64-linux-gnu/c++/11/bits/basic_file.h \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
-  /usr/include/x86_64-linux-gnu/c++/11/bits/c++io.h /usr/include/c++/11/cstdio \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h \
-  /usr/include/c++/11/bits/fstream.tcc /usr/include/c++/11/cerrno \
-  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/bits/c++config.h 
+  /opt/nvidia/hpc_sdk/Linux_x86_64/23.11/compilers/include/omp.h \
+  /usr/lib/gcc/x86_64-linux-gnu/11/include/stddef.h 
