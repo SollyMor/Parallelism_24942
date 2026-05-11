@@ -12,42 +12,43 @@
 
 namespace
 {
-constexpr int kDefaultRepeats = 50;
-const std::vector<int> kThreadCounts = {1, 2, 4, 7, 8, 16, 20, 40};
-const std::vector<int> kMatrixSizes = {20000, 40000};
+  constexpr int kDefaultRepeats = 100;
+  const std::vector<int> kThreadCounts = {1, 2, 4, 7, 8, 16, 20, 40};
+  const std::vector<int> kMatrixSizes = {20000, 40000};
 
-void print_system_info()
-{
-  std::cout << "\n=== System information ===\n";
-  std::system("lscpu | grep 'Model name'");
-  std::system("cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo 'N/A'");
-  std::system("numactl --hardware 2>/dev/null | grep -E 'available|node [0-9]+ size' || echo 'NUMA info not available'");
-  std::system("cat /etc/os-release 2>/dev/null | grep 'PRETTY_NAME' | cut -d'=' -f2 | tr -d '\"'");
-  std::cout << "==========================\n\n";
-}
-
-template <typename Func>
-void run_threads(int threads, int n, Func func)
-{
-  std::vector<std::thread> workers;
-  workers.reserve(static_cast<std::size_t>(threads));
-
-  for (int tid = 0; tid < threads; ++tid)
+  void print_system_info()
   {
-    const int begin = static_cast<int>((static_cast<std::int64_t>(n) * tid) / threads);
-    const int end = static_cast<int>((static_cast<std::int64_t>(n) * (tid + 1)) / threads);
-    workers.emplace_back(func, begin, end);
+    std::cout << "\n=== System information ===\n";
+    std::system("lscpu | grep 'Model name'");
+    std::system("cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo 'N/A'");
+    std::system("numactl --hardware 2>/dev/null | grep -E 'available|node [0-9]+ size' || echo 'NUMA info not available'");
+    std::system("cat /etc/os-release 2>/dev/null | grep 'PRETTY_NAME' | cut -d'=' -f2 | tr -d '\"'");
+    std::cout << "==========================\n\n";
   }
 
-  for (std::thread &worker : workers)
+  template <typename Func>
+  void run_threads(int threads, int n, Func func)
   {
-    worker.join();
-  }
-}
+    std::vector<std::thread> workers;
+    workers.reserve(static_cast<std::size_t>(threads));
 
-void init_data(std::vector<double> &matrix, std::vector<double> &x, int n, int threads)
-{
-  run_threads(threads, n, [&](int row_begin, int row_end) {
+    for (int tid = 0; tid < threads; ++tid)
+    {
+      const int begin = static_cast<int>((static_cast<std::int64_t>(n) * tid) / threads);
+      const int end = static_cast<int>((static_cast<std::int64_t>(n) * (tid + 1)) / threads);
+      workers.emplace_back(func, begin, end);
+    }
+
+    for (std::thread &worker : workers)
+    {
+      worker.join();
+    }
+  }
+
+  void init_data(std::vector<double> &matrix, std::vector<double> &x, int n, int threads)
+  {
+    run_threads(threads, n, [&](int row_begin, int row_end)
+                {
     for (int i = row_begin; i < row_end; ++i)
     {
       double *row = matrix.data() + static_cast<std::size_t>(i) * static_cast<std::size_t>(n);
@@ -56,19 +57,19 @@ void init_data(std::vector<double> &matrix, std::vector<double> &x, int n, int t
         row[j] = 1.0 + 0.000001 * static_cast<double>((i + j) % 100);
       }
       x[static_cast<std::size_t>(i)] = 1.0 + 0.00001 * static_cast<double>(i % 100);
-    }
-  });
-}
+    } });
+  }
 
-double multiply_matrix_vector(const std::vector<double> &matrix,
-                              const std::vector<double> &x,
-                              std::vector<double> &y,
-                              int n,
-                              int threads)
-{
-  const auto start = std::chrono::steady_clock::now();
+  double multiply_matrix_vector(const std::vector<double> &matrix,
+                                const std::vector<double> &x,
+                                std::vector<double> &y,
+                                int n,
+                                int threads)
+  {
+    const auto start = std::chrono::steady_clock::now();
 
-  run_threads(threads, n, [&](int row_begin, int row_end) {
+    run_threads(threads, n, [&](int row_begin, int row_end)
+                {
     for (int i = row_begin; i < row_end; ++i)
     {
       const double *row = matrix.data() + static_cast<std::size_t>(i) * static_cast<std::size_t>(n);
@@ -78,22 +79,21 @@ double multiply_matrix_vector(const std::vector<double> &matrix,
         sum += row[j] * x[static_cast<std::size_t>(j)];
       }
       y[static_cast<std::size_t>(i)] = sum;
-    }
-  });
+    } });
 
-  const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
-  return elapsed.count();
-}
-
-double checksum(const std::vector<double> &y)
-{
-  double sum = 0.0;
-  for (double value : y)
-  {
-    sum += value;
+    const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
+    return elapsed.count();
   }
-  return sum;
-}
+
+  double checksum(const std::vector<double> &y)
+  {
+    double sum = 0.0;
+    for (double value : y)
+    {
+      sum += value;
+    }
+    return sum;
+  }
 } // namespace
 
 int main(int argc, char **argv)
