@@ -9,6 +9,10 @@ add_executable(task2_client_server main.cpp)
 add_executable(task2_verify verify_results.cpp)
 add_executable(task2_benchmark benchmark.cpp)
 
+target_include_directories(task2_client_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(task2_verify PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(task2_benchmark PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 if(MSVC)
   target_compile_options(task2_client_server PRIVATE /W4 $<$<CONFIG:Release>:/O2> $<$<CONFIG:RelWithDebInfo>:/O2>)
   target_compile_options(task2_verify PRIVATE /W4 $<$<CONFIG:Release>:/O2> $<$<CONFIG:RelWithDebInfo>:/O2>)

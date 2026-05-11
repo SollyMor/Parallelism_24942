@@ -31,18 +31,6 @@ std::vector<int> parse_int_list(const std::string& text) {
     return values;
 }
 
-std::vector<int> make_range(int from, int to_inclusive) {
-    std::vector<int> values;
-    if (from > to_inclusive) {
-        return values;
-    }
-    values.reserve(static_cast<std::size_t>(to_inclusive - from + 1));
-    for (int v = from; v <= to_inclusive; ++v) {
-        values.push_back(v);
-    }
-    return values;
-}
-
 double mean_drop_max(std::vector<double> samples, int drop_max) {
     if (samples.empty()) {
         return -1.0;
