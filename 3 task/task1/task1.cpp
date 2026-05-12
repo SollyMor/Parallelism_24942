@@ -16,7 +16,10 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 double seconds_now() {
-    return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+    return std::chrono::duration_cast<std::chrono::duration<double>>(
+               Clock::now().time_since_epoch()
+           )
+        .count();
 }
 
 std::vector<int> parse_int_list(const std::string& text) {
