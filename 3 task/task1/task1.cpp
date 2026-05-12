@@ -31,6 +31,18 @@ std::vector<int> parse_int_list(const std::string& text) {
     return values;
 }
 
+std::vector<int> make_range(int from, int to_inclusive) {
+    std::vector<int> values;
+    if (from > to_inclusive) {
+        return values;
+    }
+    values.reserve(static_cast<std::size_t>(to_inclusive - from + 1));
+    for (int v = from; v <= to_inclusive; ++v) {
+        values.push_back(v);
+    }
+    return values;
+}
+
 double mean_drop_max(std::vector<double> samples, int drop_max) {
     if (samples.empty()) {
         return -1.0;
@@ -270,21 +282,23 @@ int main(int argc, char* argv[]) {
         const std::string arg = argv[i];
         if (arg == "--sizes" && i + 1 < argc) {
             sizes = parse_int_list(argv[++i]);
-        } else if (arg == "--threads" && i + 1 < argc) {
-            threads_list = parse_int_list(argv[++i]);
-        } else if (arg == "--repeats" && i + 1 < argc) {
+        } 
+        else if (arg == "--repeats" && i + 1 < argc) {
             repeats = std::max(1, std::stoi(argv[++i]));
-        } else if (arg == "--drop-max" && i + 1 < argc) {
+        } 
+        else if (arg == "--drop-max" && i + 1 < argc) {
             drop_max = std::max(0, std::stoi(argv[++i]));
-        } else if (arg == "--out-prefix" && i + 1 < argc) {
+        } 
+        else if (arg == "--out-prefix" && i + 1 < argc) {
             out_prefix = argv[++i];
-        } else if (arg == "--no-verify") {
+        } 
+        else if (arg == "--no-verify") {
             verify_results = false;
-        } else {
+        } 
+        else {
             std::cerr << "Unknown or incomplete argument: " << arg << "\n";
             std::cerr << "Usage: " << argv[0]
                       << " [--sizes 20000,40000]"
-                      << " [--threads 1,2,...,40]"
                       << " [--repeats 5]"
                       << " [--drop-max 1]"
                       << " [--out-prefix speedup_dgemv_stdthread]"
@@ -316,4 +330,3 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
-
