@@ -7,10 +7,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(task1_stdthread task1.cpp)
 
+find_package(Threads REQUIRED)
+target_link_libraries(task1_stdthread PRIVATE Threads::Threads)
+
 if(MSVC)
   target_compile_options(task1_stdthread PRIVATE /W4 $<$<CONFIG:Release>:/O2> $<$<CONFIG:RelWithDebInfo>:/O2>)
 else()
-  target_compile_options(task1_stdthread PRIVATE -O2 -pthread)
+  target_compile_options(task1_stdthread PRIVATE -O2 -Wall -Wextra)
 endif()
 
 enable_testing()
@@ -24,4 +27,3 @@ add_test(
     --drop-max 0
     --out-prefix ctest_speedup_dgemv_stdthread
 )
-

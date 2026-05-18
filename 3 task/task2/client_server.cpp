@@ -195,7 +195,7 @@ void client_pow(TaskServer<double> &server, int count)
     write_record(file, {id, "pow", x, y, result});
   }
 }
-} // namespace
+} 
 
 int main(int argc, char **argv)
 {

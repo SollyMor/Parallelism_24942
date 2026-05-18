@@ -276,7 +276,7 @@ void print_table(std::size_t n, const std::vector<ResultRow>& rows) {
 int main(int argc, char* argv[]) {
     std::vector<int> sizes = {20000, 40000};
     std::vector<int> threads_list = {1, 2, 4, 7, 8, 16, 20, 40};
-    int repeats = 5;
+    int repeats = 100;
     int drop_max = 1;
     std::string out_prefix = "speedup_dgemv_stdthread";
     bool verify_results = true;
