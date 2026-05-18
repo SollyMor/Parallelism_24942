@@ -1,9 +1,11 @@
 *
+
 !*/
 
 .vscode
 build
 
+!*.py
 !*.cpp
 !*.txt
 !*.md
