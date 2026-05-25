@@ -11,115 +11,57 @@
 
 
 #include <boost/program_options.hpp>
-
-
-
 #include <chrono>
-
 #include <cmath>
-
 #include <cstdio>
-
 #include <iomanip>
-
 #include <iostream>
-
 #include <limits>
-
 #include <string>
-
 #include <vector>
-
-
 
 namespace po = boost::program_options;
 
-
-
 namespace
-
 {
-
   constexpr double kCornerBL = 10.0;
-
   constexpr double kCornerBR = 20.0;
-
   constexpr double kCornerTR = 30.0;
-
   constexpr double kCornerTL = 20.0;
 
-
-
   inline std::size_t idx(int i, int j, int n) noexcept
-
   {
-
-    return static_cast<std::size_t>(i) * static_cast<std::size_t>(n) +
-
-           static_cast<std::size_t>(j);
-
+    return static_cast<std::size_t>(i) * static_cast<std::size_t>(n) + static_cast<std::size_t>(j);
   }
 
 
 
   void init_grid(double *u, int n)
-
   {
-
     const std::size_t cells =
-
         static_cast<std::size_t>(n) * static_cast<std::size_t>(n);
-
     const int nm1 = n - 1;
-
     const double inv = (nm1 > 0) ? (1.0 / static_cast<double>(nm1)) : 0.0;
-
-
-
     for (std::size_t k = 0; k < cells; ++k)
-
     {
-
       u[k] = 0.0;
-
     }
-
-
-
     u[idx(0, 0, n)] = kCornerBL;
-
     u[idx(nm1, 0, n)] = kCornerBR;
-
     u[idx(nm1, nm1, n)] = kCornerTR;
-
-    u[idx(0, nm1, n)] = kCornerTL;
-
-
-
+    u[idx(0, nm1, n)] = kCornerTL
     for (int i = 0; i < n; ++i)
-
     {
-
       const double t = static_cast<double>(i) * inv;
-
       u[idx(i, 0, n)] = kCornerBL + (kCornerBR - kCornerBL) * t;
-
       u[idx(i, nm1, n)] = kCornerTL + (kCornerTR - kCornerTL) * t;
-
     }
-
     for (int j = 0; j < n; ++j)
-
     {
-
       const double t = static_cast<double>(j) * inv;
-
       u[idx(0, j, n)] = kCornerBL + (kCornerTL - kCornerBL) * t;
-
       u[idx(nm1, j, n)] = kCornerBR + (kCornerTR - kCornerBR) * t;
-
     }
-
   }
 
 
