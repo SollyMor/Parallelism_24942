@@ -1,6 +1,11 @@
 *
-
 !*/
+
+
+**/PAK
+**/*.PAK
+**/PAK.*
+
 
 .vscode
 build
