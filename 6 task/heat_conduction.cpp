@@ -107,7 +107,7 @@ namespace
     double err = 0.0;
     const std::size_t sn = static_cast<std::size_t>(n);
 
-#pragma acc parallel loop collapse(2) tile(32, 32) reduction(max : err) present(cur[:sz], next[:sz])
+#pragma acc parallel loop tile(32, 32) reduction(max : err) present(cur[:sz], next[:sz])
     for (int i = 1; i < n - 1; ++i)
     {
       for (int j = 1; j < n - 1; ++j)
