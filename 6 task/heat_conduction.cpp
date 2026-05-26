@@ -35,7 +35,6 @@ namespace
       u[k] = 0.0;
     }
 
-
     u[idx(0, 0, n)] = kCornerBL;
     u[idx(nm1, 0, n)] = kCornerBR;
     u[idx(nm1, nm1, n)] = kCornerTR;
@@ -54,8 +53,6 @@ namespace
       u[idx(nm1, j, n)] = kCornerBR + (kCornerTR - kCornerBR) * t;
     }
   }
-
-
 
   void print_grid(const double *u, int n)
   {
@@ -76,10 +73,7 @@ namespace
     std::cout << std::flush;
   }
 
-
-
-  /** Jacobi + max residual in one pass (linear indexing). */
-
+  /** Jacobi + max residual in one pass; arrays already on device (present). */
   double jacobi_step(double *cur, double *next, int n, std::size_t sz)
   {
     double err = 0.0;
@@ -102,6 +96,7 @@ namespace
     return err;
   }
 
+  /** Tiled variant for GPU cache locality (no collapse — conflicts with tile). */
   double jacobi_step_tiled(double *cur, double *next, int n, std::size_t sz)
   {
     double err = 0.0;
@@ -124,8 +119,6 @@ namespace
     return err;
   }
 
-
-
   struct SolveResult
   {
     int iterations = 0;
@@ -133,103 +126,58 @@ namespace
     double seconds = 0.0;
   };
 
-  SolveResult solve_baseline(std::vector<double> &u,
-                             std::vector<double> &u_new,
-                             int n,
-                             double eps,
-                             int max_iters,
-                             double *&solution)
+  /**
+   * copyin(u) once at region entry; u_new allocated on device only (create).
+   * No copyout on exit — host vectors stay stale unless sync_host is set.
+   * Timer covers only the iteration loop (not update host / region teardown).
+   */
+  SolveResult solve_acc(std::vector<double> &u,
+                        std::vector<double> &u_new,
+                        int n,
+                        double eps,
+                        int max_iters,
+                        double *&solution,
+                        bool use_tiled,
+                        bool sync_host)
   {
-
     const std::size_t sz = u.size();
     init_grid(u.data(), n);
 
     double err = std::numeric_limits<double>::infinity();
     int iter = 0;
-    bool write_to_new = true;
+    double *cur = u.data();
+    double *next = u_new.data();
 
-    const auto t0 = std::chrono::steady_clock::now();
-
-#pragma acc data copy(u[:sz], u_new[:sz])
-    {
-      while (iter < max_iters && err > eps)
-      {
-        if (write_to_new)
-        {
-          err = jacobi_step(u.data(), u_new.data(), n, sz);
-        }
-        else
-        {
-          err = jacobi_step(u_new.data(), u.data(), n, sz);
-        }
-        write_to_new = !write_to_new;
-        ++iter;
-      }
-
-    }
-
-
-
-    solution = write_to_new ? u.data() : u_new.data();
-    const auto t1 = std::chrono::steady_clock::now();
-    return {iter, err,
-            std::chrono::duration<double>(t1 - t0).count()};
-  }
-
-
-
-  SolveResult solve_optimized(std::vector<double> &u,
-                              std::vector<double> &u_new,
-                              int n,
-                              double eps,
-                              int max_iters,
-                              double *&solution)
-  {
-
-    const std::size_t sz = u.size();
-    init_grid(u.data(), n);
-
-    double err = std::numeric_limits<double>::infinity();
-    int iter = 0;
-    bool write_to_new = true;
-    const auto t0 = std::chrono::steady_clock::now();
-
-
+    SolveResult result;
 
 #pragma acc data copyin(u[:sz]) create(u_new[:sz])
-
     {
+      const auto t0 = std::chrono::steady_clock::now();
+
       while (iter < max_iters && err > eps)
       {
-        if (write_to_new)
-        {
-          err = jacobi_step_tiled(u.data(), u_new.data(), n, sz);
-        }
-        else
-        {
-          err = jacobi_step_tiled(u_new.data(), u.data(), n, sz);
-        }
-        write_to_new = !write_to_new;
+        err = use_tiled ? jacobi_step_tiled(cur, next, n, sz)
+                        : jacobi_step(cur, next, n, sz);
+        std::swap(cur, next);
         ++iter;
       }
 
-      double *const sol = write_to_new ? u.data() : u_new.data();
+      const auto t1 = std::chrono::steady_clock::now();
+      result.seconds = std::chrono::duration<double>(t1 - t0).count();
+      result.iterations = iter;
+      result.error = err;
+      solution = cur;
 
-#pragma acc update host(sol[:sz])
-      solution = sol;
+      if (sync_host)
+      {
+#pragma acc update host(solution[:sz])
+      }
     }
 
-
-
-    const auto t1 = std::chrono::steady_clock::now();
-    return {iter, err,
-            std::chrono::duration<double>(t1 - t0).count()};
-
+    return result;
   }
 
 } // namespace
-
-
 
 int main(int argc, char **argv)
 {
@@ -251,7 +199,7 @@ int main(int argc, char **argv)
         "max-iters,m", po::value<int>(&max_iters)->default_value(1000000),
         "maximum iterations")(
         "optimized,o", po::bool_switch(&optimized),
-        "optimized: copyin/create, tiled Jacobi, on-device residual")(
+        "optimized: copyin/create, tiled Jacobi, host sync only if grid printed")(
         "print-grid,p", po::bool_switch(&print_grid_flag),
         "print full grid (auto for N=10 or N=13)")(
         "quiet,q", po::bool_switch(&quiet), "only iterations and error");
@@ -273,15 +221,16 @@ int main(int argc, char **argv)
     }
 
     const int n = grid_size;
-    const std::size_t sz = static_cast<std::size_t>(n) * static_cast<std::size_t>(n);
+    const std::size_t sz =
+        static_cast<std::size_t>(n) * static_cast<std::size_t>(n);
     std::vector<double> u(sz, 0.0);
     std::vector<double> u_new(sz, 0.0);
 
+    const bool sync_host = print_grid_flag || n == 10 || n == 13;
     double *solution = u.data();
 
     const SolveResult result =
-        optimized ? solve_optimized(u, u_new, n, eps, max_iters, solution)
-                  : solve_baseline(u, u_new, n, eps, max_iters, solution);
+        solve_acc(u, u_new, n, eps, max_iters, solution, optimized, sync_host);
 
     if (!quiet)
     {
@@ -298,7 +247,7 @@ int main(int argc, char **argv)
       std::cout << result.iterations << ' ' << result.error << '\n';
     }
 
-    if (print_grid_flag || n == 10 || n == 13)
+    if (sync_host)
     {
       print_grid(solution, n);
     }
@@ -311,5 +260,3 @@ int main(int argc, char **argv)
   }
   return 0;
 }
-
-

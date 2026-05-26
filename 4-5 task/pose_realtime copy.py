@@ -31,11 +31,12 @@ class Camera:
         """Считать кадр; (ok, frame)."""
         return self._cap.read()
 
-    def __del__(self) -> None:
+    def release(self) -> None:
         """Освободить камеру."""
         cap = getattr(self, "_cap", None)
         if cap is not None:
             cap.release()
+            self._cap = None
 
 
 class Window:
@@ -44,6 +45,7 @@ class Window:
     def __init__(self, name: str = "YOLOv8 pose realtime") -> None:
         """Создать именованное окно OpenCV."""
         self._name = name
+        self._closed = False
         cv2.namedWindow(self._name, cv2.WINDOW_NORMAL)
 
     def show(self, frame) -> bool:
@@ -51,12 +53,15 @@ class Window:
         cv2.imshow(self._name, frame)
         return (cv2.waitKey(1) & 0xFF) != ord("q")
 
-    def __del__(self) -> None:
+    def close(self) -> None:
         """Закрыть окно."""
+        if self._closed:
+            return
         try:
             cv2.destroyWindow(self._name)
         except cv2.error:
             pass
+        self._closed = True
 
 
 def put_latest(out_queue: Queue, value) -> None:
@@ -392,7 +397,8 @@ def main() -> int:
             if proc.is_alive():
                 proc.terminate()
 
-        cv2.destroyAllWindows()
+        window.close()
+        camera.release()
         print("Done")
 
     return 0
