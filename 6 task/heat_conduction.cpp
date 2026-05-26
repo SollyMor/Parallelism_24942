@@ -127,9 +127,10 @@ namespace
   };
 
   /**
-   * copyin(u) once at region entry; u_new allocated on device only (create).
-   * No copyout on exit — host vectors stay stale unless sync_host is set.
-   * Timer covers only the iteration loop (not update host / region teardown).
+   * copyin both grids once (fixed BC on device for u and u_new).
+   * Jacobi only updates interiors; edges must be valid before each read.
+   * No copyout on exit unless sync_host (benchmark path = zero grid transfers).
+   * Fixed u/u_new pointers in kernels — do not swap cur/next (breaks present).
    */
   SolveResult solve_acc(std::vector<double> &u,
                         std::vector<double> &u_new,
@@ -142,23 +143,31 @@ namespace
   {
     const std::size_t sz = u.size();
     init_grid(u.data(), n);
+    init_grid(u_new.data(), n);
 
     double err = std::numeric_limits<double>::infinity();
     int iter = 0;
-    double *cur = u.data();
-    double *next = u_new.data();
+    bool write_to_new = true;
 
     SolveResult result;
 
-#pragma acc data copyin(u[:sz]) create(u_new[:sz])
+#pragma acc data copyin(u[:sz], u_new[:sz])
     {
       const auto t0 = std::chrono::steady_clock::now();
 
       while (iter < max_iters && err > eps)
       {
-        err = use_tiled ? jacobi_step_tiled(cur, next, n, sz)
-                        : jacobi_step(cur, next, n, sz);
-        std::swap(cur, next);
+        if (write_to_new)
+        {
+          err = use_tiled ? jacobi_step_tiled(u.data(), u_new.data(), n, sz)
+                          : jacobi_step(u.data(), u_new.data(), n, sz);
+        }
+        else
+        {
+          err = use_tiled ? jacobi_step_tiled(u_new.data(), u.data(), n, sz)
+                          : jacobi_step(u_new.data(), u.data(), n, sz);
+        }
+        write_to_new = !write_to_new;
         ++iter;
       }
 
@@ -166,7 +175,7 @@ namespace
       result.seconds = std::chrono::duration<double>(t1 - t0).count();
       result.iterations = iter;
       result.error = err;
-      solution = cur;
+      solution = write_to_new ? u.data() : u_new.data();
 
       if (sync_host)
       {
