@@ -98,8 +98,6 @@ def resolve_device(choice: str) -> tuple[int | str, bool]:
 
         cuda_ver = torch.version.cuda or "unknown"
         print(f"Using GPU 0: {torch.cuda.get_device_name(0)} (CUDA {cuda_ver})")
-        if cuda_ver != "11.8" and not cuda_ver.startswith("11."):
-            print(f"Note: this script is tuned for CUDA 11.8; detected {cuda_ver}")
         return 0, True
 
     return choice, choice != "cpu"
@@ -151,7 +149,6 @@ def worker_process(
     infer_fps: Value,
     worker_ready: Event,
 ) -> None:
-    """Процесс: инференс pose по одному кадру из очереди."""
     if device == "cpu":
         os.environ.setdefault("OMP_NUM_THREADS", "1")
 
@@ -198,80 +195,6 @@ def worker_process(
     print(f"Worker {worker_id} stopped")
 
 
-def batched_worker_process(
-    worker_id: int,
-    input_queue: Queue,
-    output_queue: Queue,
-    stop_event: Event,
-    batch_size: int,
-    device: int | str,
-    imgsz: int,
-    use_half: bool,
-    infer_fps: Value,
-    worker_ready: Event,
-) -> None:
-    """Процесс: инференс pose пакетами кадров (для CPU)."""
-    if device == "cpu":
-        os.environ.setdefault("OMP_NUM_THREADS", "1")
-
-    model = YOLO(MODEL_NAME)
-    predict_kw = _predict_kwargs(device, imgsz, use_half)
-    print(f"Batched worker {worker_id}: batch_size={batch_size}, device={device}")
-
-    import numpy as np
-
-    dummy = np.zeros((imgsz, imgsz, 3), dtype=np.uint8)
-    model(dummy, **predict_kw)
-    worker_ready.set()
-
-    batch_frames: list = []
-    batch_ids: list[int] = []
-    last_batch_time = time.perf_counter()
-    infer_frames = 0
-    infer_t0 = time.perf_counter()
-
-    def flush_batch() -> None:
-        """Обработать накопленный батч и отправить результаты."""
-        nonlocal batch_frames, batch_ids, last_batch_time, infer_frames, infer_t0
-        if not batch_frames:
-            return
-        results = model(batch_frames, **predict_kw)
-        for fid, res in zip(batch_ids, results):
-            put_latest(output_queue, (fid, res.plot()))
-        infer_frames += len(batch_frames)
-        batch_frames = []
-        batch_ids = []
-        last_batch_time = time.perf_counter()
-
-        now = time.perf_counter()
-        if now - infer_t0 >= 1.0:
-            with infer_fps.get_lock():
-                infer_fps.value = int(infer_frames / (now - infer_t0))
-            infer_frames = 0
-            infer_t0 = now
-
-    while not stop_event.is_set():
-        try:
-            frame_data = input_queue.get(timeout=0.05)
-        except queue.Empty:
-            if batch_frames and time.perf_counter() - last_batch_time > 0.15:
-                flush_batch()
-            continue
-
-        if frame_data is None:
-            flush_batch()
-            break
-
-        frame_id, frame = frame_data
-        batch_frames.append(frame)
-        batch_ids.append(frame_id)
-
-        if len(batch_frames) >= batch_size or time.perf_counter() - last_batch_time > 0.1:
-            flush_batch()
-
-    print(f"Batched worker {worker_id} stopped")
-
-
 def parse_args() -> argparse.Namespace:
     """Разобрать аргументы командной строки."""
     cpu_default = min(4, mp.cpu_count() or 4)
@@ -283,8 +206,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--workers", type=int, default=None, help=f"Worker processes (default: 1 on GPU, {cpu_default} on CPU)")
     parser.add_argument("--imgsz", type=int, default=320, help="YOLO inference size")
-    parser.add_argument("--batch-size", type=int, default=2, help="CPU batching only")
-    parser.add_argument("--use-batching", action="store_true", help="Batch frames (recommended for CPU, not for low-latency GPU)")
     parser.add_argument("--queue-size", type=int, default=8)
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"], help="auto: GPU if cu118 torch sees CUDA, else CPU")
     return parser.parse_args()
@@ -295,10 +216,6 @@ def main() -> int:
     args = parse_args()
     device, use_half = resolve_device(args.device)
     workers_count = default_workers(device, args.workers)
-
-    if device != "cpu" and args.use_batching:
-        print("GPU mode: ignoring --use-batching (single-frame is faster)")
-        args.use_batching = False
 
     print(f"Model: {MODEL_NAME}, device={device}, workers={workers_count}, imgsz={args.imgsz}")
 
@@ -320,16 +237,7 @@ def main() -> int:
 
     for i in range(workers_count):
         common_tail = (device, args.imgsz, use_half, infer_fps, ready_events[i])
-        if args.use_batching:
-            proc = mp.Process(
-                target=batched_worker_process,
-                args=(i, input_queue, output_queue, stop_event, args.batch_size, *common_tail),
-            )
-        else:
-            proc = mp.Process(
-                target=worker_process,
-                args=(i, input_queue, output_queue, stop_event, *common_tail),
-            )
+        proc = mp.Process(target=worker_process, args=(i, input_queue, output_queue, stop_event, *common_tail))
         workers.append(proc)
         proc.start()
 
