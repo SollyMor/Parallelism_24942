@@ -227,7 +227,7 @@ namespace
         }
 
         err = 0.0;
-#pragma acc update device(err)
+#pragma acc update device(err) async(1)
         if (write_to_new)
         {
           jacobi_step_err(u_ptr, u_new_ptr, n, sz, err, use_tiled);
@@ -239,8 +239,8 @@ namespace
         write_to_new = !write_to_new;
         ++iter;
 
+#pragma acc update host(err) async(1)
 #pragma acc wait(1)
-#pragma acc update host(err)
 
         err_host = err;
       }
@@ -316,7 +316,7 @@ int main(int argc, char **argv)
 
     if (optimized && check_interval == 1)
     {
-      check_interval = 50;
+      check_interval = 100;
     }
 
     const bool sync_host = print_grid_flag || grid_size == 10 || grid_size == 13;

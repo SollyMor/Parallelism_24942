@@ -17,6 +17,7 @@ elseif(EXISTS "/opt/nvidia/hpc_sdk/Linux_x86_64/25.1/compilers/bin/nvc++")
 endif()
 
 set(ACC_MODE "host" CACHE STRING "OpenACC device: host, multicore, gpu")
+set(GPU_ARCH "cc70" CACHE STRING "NVIDIA GPU architecture, e.g. cc70 for V100")
 set(HEAT_OPTIMIZED OFF CACHE BOOL "Build with --optimized as default path")
 set(HEAT_MINFO OFF CACHE BOOL "Enable verbose -Minfo=all diagnostics")
 
@@ -28,6 +29,10 @@ target_compile_definitions(heat_conduction PRIVATE ACC_MODE_STR="${ACC_MODE}")
 target_compile_options(
   heat_conduction
   PRIVATE -O3 -acc=${ACC_MODE} -fast)
+
+if(ACC_MODE STREQUAL "gpu")
+  target_compile_options(heat_conduction PRIVATE -gpu=${GPU_ARCH})
+endif()
 
 if(HEAT_MINFO)
   target_compile_options(heat_conduction PRIVATE -Minfo=all)
