@@ -73,15 +73,55 @@ namespace
     std::cout << std::flush;
   }
 
-  /** Jacobi step; err lives in acc data region (device), no host read here. */
-  void jacobi_step_async(double *cur, double *next, int n, std::size_t sz,
-                         double &err, bool use_tiled)
+  /** Fast Jacobi step without residual reduction. */
+  void jacobi_step_noerr(double *cur, double *next, int n, std::size_t sz,
+                         bool use_tiled)
   {
     const std::size_t sn = static_cast<std::size_t>(n);
 
     if (use_tiled)
     {
-#pragma acc parallel loop tile(32, 32) async reduction(max : err) \
+#pragma acc parallel loop tile(32, 32) vector_length(256) \
+    present(cur[:sz], next[:sz])
+      for (int i = 1; i < n - 1; ++i)
+      {
+        for (int j = 1; j < n - 1; ++j)
+        {
+          const std::size_t c =
+              static_cast<std::size_t>(i) * sn + static_cast<std::size_t>(j);
+          const double v =
+              0.25 * (cur[c - sn] + cur[c + sn] + cur[c - 1] + cur[c + 1]);
+          next[c] = v;
+        }
+      }
+    }
+    else
+    {
+#pragma acc parallel loop collapse(2) vector_length(256) \
+    present(cur[:sz], next[:sz])
+      for (int i = 1; i < n - 1; ++i)
+      {
+        for (int j = 1; j < n - 1; ++j)
+        {
+          const std::size_t c =
+              static_cast<std::size_t>(i) * sn + static_cast<std::size_t>(j);
+          const double v =
+              0.25 * (cur[c - sn] + cur[c + sn] + cur[c - 1] + cur[c + 1]);
+          next[c] = v;
+        }
+      }
+    }
+  }
+
+  /** Jacobi step with residual reduction (use only for convergence checks). */
+  void jacobi_step_err(double *cur, double *next, int n, std::size_t sz,
+                       double &err, bool use_tiled)
+  {
+    const std::size_t sn = static_cast<std::size_t>(n);
+
+    if (use_tiled)
+    {
+#pragma acc parallel loop tile(32, 32) vector_length(256) reduction(max : err) \
     present(cur[:sz], next[:sz])
       for (int i = 1; i < n - 1; ++i)
       {
@@ -99,7 +139,7 @@ namespace
     }
     else
     {
-#pragma acc parallel loop collapse(2) async reduction(max : err) \
+#pragma acc parallel loop collapse(2) vector_length(256) reduction(max : err) \
     present(cur[:sz], next[:sz])
       for (int i = 1; i < n - 1; ++i)
       {
@@ -163,33 +203,41 @@ namespace
     {
       const auto t0 = std::chrono::steady_clock::now();
 
-      while (iter < max_iters)
+      while (iter < max_iters && err_host > eps)
       {
-        const int batch =
-            std::min(check_interval, max_iters - iter);
+        const int batch = std::min(check_interval, max_iters - iter);
+        const int steps_noerr = (batch > 1) ? (batch - 1) : 0;
 
-        for (int s = 0; s < batch; ++s)
+        for (int s = 0; s < steps_noerr; ++s)
         {
           if (write_to_new)
           {
-            jacobi_step_async(u_ptr, u_new_ptr, n, sz, err, use_tiled);
+            jacobi_step_noerr(u_ptr, u_new_ptr, n, sz, use_tiled);
           }
           else
           {
-            jacobi_step_async(u_new_ptr, u_ptr, n, sz, err, use_tiled);
+            jacobi_step_noerr(u_new_ptr, u_ptr, n, sz, use_tiled);
           }
           write_to_new = !write_to_new;
           ++iter;
         }
 
-#pragma acc wait
+        err = 0.0;
+#pragma acc update device(err)
+        if (write_to_new)
+        {
+          jacobi_step_err(u_ptr, u_new_ptr, n, sz, err, use_tiled);
+        }
+        else
+        {
+          jacobi_step_err(u_new_ptr, u_ptr, n, sz, err, use_tiled);
+        }
+        write_to_new = !write_to_new;
+        ++iter;
+
 #pragma acc update host(err)
 
         err_host = err;
-        if (err_host <= eps)
-        {
-          break;
-        }
       }
 
       const auto t1 = std::chrono::steady_clock::now();
