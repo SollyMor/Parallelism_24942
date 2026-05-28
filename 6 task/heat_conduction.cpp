@@ -73,50 +73,48 @@ namespace
     std::cout << std::flush;
   }
 
-  /** Jacobi + max residual in one pass; arrays already on device (present). */
-  double jacobi_step(double *cur, double *next, int n, std::size_t sz)
+  /** Jacobi step; err lives in acc data region (device), no host read here. */
+  void jacobi_step_async(double *cur, double *next, int n, std::size_t sz,
+                         double &err, bool use_tiled)
   {
-    double err = 0.0;
     const std::size_t sn = static_cast<std::size_t>(n);
 
-#pragma acc parallel loop collapse(2) reduction(max : err) present(cur[:sz], next[:sz])
-    for (int i = 1; i < n - 1; ++i)
+    if (use_tiled)
     {
-      for (int j = 1; j < n - 1; ++j)
+#pragma acc parallel loop tile(32, 32) async reduction(max : err) \
+    present(cur[:sz], next[:sz])
+      for (int i = 1; i < n - 1; ++i)
       {
-        const std::size_t c =
-            static_cast<std::size_t>(i) * sn + static_cast<std::size_t>(j);
-        const double v =
-            0.25 * (cur[c - sn] + cur[c + sn] + cur[c - 1] + cur[c + 1]);
-        const double d = std::fabs(v - cur[c]);
-        next[c] = v;
-        err = std::fmax(err, d);
+        for (int j = 1; j < n - 1; ++j)
+        {
+          const std::size_t c =
+              static_cast<std::size_t>(i) * sn + static_cast<std::size_t>(j);
+          const double v =
+              0.25 * (cur[c - sn] + cur[c + sn] + cur[c - 1] + cur[c + 1]);
+          const double d = std::fabs(v - cur[c]);
+          next[c] = v;
+          err = std::fmax(err, d);
+        }
       }
     }
-    return err;
-  }
-
-  /** Tiled variant for GPU cache locality (no collapse — conflicts with tile). */
-  double jacobi_step_tiled(double *cur, double *next, int n, std::size_t sz)
-  {
-    double err = 0.0;
-    const std::size_t sn = static_cast<std::size_t>(n);
-
-#pragma acc parallel loop tile(32, 32) reduction(max : err) present(cur[:sz], next[:sz])
-    for (int i = 1; i < n - 1; ++i)
+    else
     {
-      for (int j = 1; j < n - 1; ++j)
+#pragma acc parallel loop collapse(2) async reduction(max : err) \
+    present(cur[:sz], next[:sz])
+      for (int i = 1; i < n - 1; ++i)
       {
-        const std::size_t c =
-            static_cast<std::size_t>(i) * sn + static_cast<std::size_t>(j);
-        const double v =
-            0.25 * (cur[c - sn] + cur[c + sn] + cur[c - 1] + cur[c + 1]);
-        const double d = std::fabs(v - cur[c]);
-        next[c] = v;
-        err = std::fmax(err, d);
+        for (int j = 1; j < n - 1; ++j)
+        {
+          const std::size_t c =
+              static_cast<std::size_t>(i) * sn + static_cast<std::size_t>(j);
+          const double v =
+              0.25 * (cur[c - sn] + cur[c + sn] + cur[c - 1] + cur[c + 1]);
+          const double d = std::fabs(v - cur[c]);
+          next[c] = v;
+          err = std::fmax(err, d);
+        }
       }
     }
-    return err;
   }
 
   struct SolveResult
@@ -139,7 +137,8 @@ namespace
                         int max_iters,
                         double *&solution,
                         bool use_tiled,
-                        bool sync_host)
+                        bool sync_host,
+                        int check_interval)
   {
     const std::size_t sz = u.size();
     double *u_ptr = u.data();
@@ -147,36 +146,56 @@ namespace
     init_grid(u.data(), n);
     init_grid(u_new.data(), n);
 
+    if (check_interval < 1)
+    {
+      check_interval = 1;
+    }
+
     double err = std::numeric_limits<double>::infinity();
+    double err_host = err;
     int iter = 0;
     bool write_to_new = true;
 
     SolveResult result;
 
-#pragma acc data copyin(u_ptr[0:sz], u_new_ptr[0:sz])
+    /* err in copy() stays on device; host reads err only every check_interval. */
+#pragma acc data copyin(u_ptr[0:sz], u_new_ptr[0:sz]) copy(err)
     {
       const auto t0 = std::chrono::steady_clock::now();
 
-      while (iter < max_iters && err > eps)
+      while (iter < max_iters)
       {
-        if (write_to_new)
+        const int batch =
+            std::min(check_interval, max_iters - iter);
+
+        for (int s = 0; s < batch; ++s)
         {
-          err = use_tiled ? jacobi_step_tiled(u_ptr, u_new_ptr, n, sz)
-                          : jacobi_step(u_ptr, u_new_ptr, n, sz);
+          if (write_to_new)
+          {
+            jacobi_step_async(u_ptr, u_new_ptr, n, sz, err, use_tiled);
+          }
+          else
+          {
+            jacobi_step_async(u_new_ptr, u_ptr, n, sz, err, use_tiled);
+          }
+          write_to_new = !write_to_new;
+          ++iter;
         }
-        else
+
+#pragma acc wait
+#pragma acc update host(err)
+
+        err_host = err;
+        if (err_host <= eps)
         {
-          err = use_tiled ? jacobi_step_tiled(u_new_ptr, u_ptr, n, sz)
-                          : jacobi_step(u_new_ptr, u_ptr, n, sz);
+          break;
         }
-        write_to_new = !write_to_new;
-        ++iter;
       }
 
       const auto t1 = std::chrono::steady_clock::now();
       result.seconds = std::chrono::duration<double>(t1 - t0).count();
       result.iterations = iter;
-      result.error = err;
+      result.error = err_host;
       solution = write_to_new ? u_ptr : u_new_ptr;
 
       if (sync_host)
@@ -207,6 +226,7 @@ int main(int argc, char **argv)
     bool optimized = false;
     bool print_grid_flag = false;
     bool quiet = false;
+    int check_interval = 1;
 
     po::options_description desc("2D heat equation (five-point Jacobi), OpenACC");
     desc.add_options()("help,h", "print help")(
@@ -217,7 +237,9 @@ int main(int argc, char **argv)
         "max-iters,m", po::value<int>(&max_iters)->default_value(1000000),
         "maximum iterations")(
         "optimized,o", po::bool_switch(&optimized),
-        "optimized: copyin/create, tiled Jacobi, host sync only if grid printed")(
+        "optimized: tiled Jacobi, async kernels, batched convergence checks")(
+        "check-interval,c", po::value<int>(&check_interval)->default_value(1),
+        "sync host every N iterations (1=every iter; try 10-100 on GPU)")(
         "print-grid,p", po::bool_switch(&print_grid_flag),
         "print full grid (auto for N=10 or N=13)")(
         "quiet,q", po::bool_switch(&quiet), "only iterations and error");
@@ -236,6 +258,17 @@ int main(int argc, char **argv)
     optimized = true;
 #endif
 
+    if (optimized && check_interval == 1)
+    {
+      check_interval = 50;
+    }
+
+    const bool sync_host = print_grid_flag || grid_size == 10 || grid_size == 13;
+    if (sync_host)
+    {
+      check_interval = 1;
+    }
+
     if (grid_size < 3)
     {
       std::cerr << "Grid size must be >= 3\n";
@@ -248,11 +281,10 @@ int main(int argc, char **argv)
     std::vector<double> u(sz, 0.0);
     std::vector<double> u_new(sz, 0.0);
 
-    const bool sync_host = print_grid_flag || n == 10 || n == 13;
     double *solution = u.data();
 
-    const SolveResult result =
-        solve_acc(u, u_new, n, eps, max_iters, solution, optimized, sync_host);
+    const SolveResult result = solve_acc(u, u_new, n, eps, max_iters, solution,
+                                       optimized, sync_host, check_interval);
 
     if (!quiet)
     {
@@ -264,6 +296,7 @@ int main(int argc, char **argv)
       std::cout << "acc_mode=unknown\n";
 #endif
       std::cout << "grid=" << n << "x" << n << '\n';
+      std::cout << "check_interval=" << check_interval << '\n';
       std::cout << "iterations=" << result.iterations << '\n';
       std::cout << "error=" << result.error << '\n';
       std::cout << "time_sec=" << std::fixed << std::setprecision(6)
