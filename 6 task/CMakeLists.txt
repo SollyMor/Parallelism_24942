@@ -22,6 +22,7 @@ set(HEAT_OPTIMIZED OFF CACHE BOOL "Build with --optimized as default path")
 add_executable(heat_conduction ${HEAT_SOURCES})
 target_include_directories(heat_conduction PRIVATE ${Boost_INCLUDE_DIRS})
 target_link_libraries(heat_conduction PRIVATE Boost::program_options)
+target_compile_definitions(heat_conduction PRIVATE ACC_MODE_STR="${ACC_MODE}")
 
 target_compile_options(
   heat_conduction

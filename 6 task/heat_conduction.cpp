@@ -223,6 +223,10 @@ int main(int argc, char **argv)
       return 0;
     }
 
+#ifdef FORCE_OPTIMIZED
+    optimized = true;
+#endif
+
     if (grid_size < 3)
     {
       std::cerr << "Grid size must be >= 3\n";
@@ -245,6 +249,11 @@ int main(int argc, char **argv)
     {
       std::cout << std::scientific << std::setprecision(6);
       std::cout << "mode=" << (optimized ? "optimized" : "baseline") << '\n';
+#ifdef ACC_MODE_STR
+      std::cout << "acc_mode=" << ACC_MODE_STR << '\n';
+#else
+      std::cout << "acc_mode=unknown\n";
+#endif
       std::cout << "grid=" << n << "x" << n << '\n';
       std::cout << "iterations=" << result.iterations << '\n';
       std::cout << "error=" << result.error << '\n';
