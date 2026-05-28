@@ -181,7 +181,14 @@ namespace
 
       if (sync_host)
       {
-#pragma acc update host(solution[:sz])
+        if (write_to_new)
+        {
+#pragma acc update host(u_ptr[0:sz])
+        }
+        else
+        {
+#pragma acc update host(u_new_ptr[0:sz])
+        }
       }
     }
 
