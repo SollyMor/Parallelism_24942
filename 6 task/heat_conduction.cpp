@@ -142,6 +142,8 @@ namespace
                         bool sync_host)
   {
     const std::size_t sz = u.size();
+    double *u_ptr = u.data();
+    double *u_new_ptr = u_new.data();
     init_grid(u.data(), n);
     init_grid(u_new.data(), n);
 
@@ -151,7 +153,7 @@ namespace
 
     SolveResult result;
 
-#pragma acc data copyin(u[:sz], u_new[:sz])
+#pragma acc data copyin(u_ptr[0:sz], u_new_ptr[0:sz])
     {
       const auto t0 = std::chrono::steady_clock::now();
 
@@ -159,13 +161,13 @@ namespace
       {
         if (write_to_new)
         {
-          err = use_tiled ? jacobi_step_tiled(u.data(), u_new.data(), n, sz)
-                          : jacobi_step(u.data(), u_new.data(), n, sz);
+          err = use_tiled ? jacobi_step_tiled(u_ptr, u_new_ptr, n, sz)
+                          : jacobi_step(u_ptr, u_new_ptr, n, sz);
         }
         else
         {
-          err = use_tiled ? jacobi_step_tiled(u_new.data(), u.data(), n, sz)
-                          : jacobi_step(u_new.data(), u.data(), n, sz);
+          err = use_tiled ? jacobi_step_tiled(u_new_ptr, u_ptr, n, sz)
+                          : jacobi_step(u_new_ptr, u_ptr, n, sz);
         }
         write_to_new = !write_to_new;
         ++iter;
@@ -175,7 +177,7 @@ namespace
       result.seconds = std::chrono::duration<double>(t1 - t0).count();
       result.iterations = iter;
       result.error = err;
-      solution = write_to_new ? u.data() : u_new.data();
+      solution = write_to_new ? u_ptr : u_new_ptr;
 
       if (sync_host)
       {

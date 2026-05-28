@@ -22,6 +22,9 @@ sudo apt install libboost-program-options-dev   # при необходимос�
 make ACC=host
 make ACC=multicore
 make ACC=gpu
+
+# Если нужен подробный вывод компилятора OpenACC (для отчёта):
+make ACC=gpu MINFO=1
 ```
 
 4 режима для отчёта:

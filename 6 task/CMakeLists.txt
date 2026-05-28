@@ -18,6 +18,7 @@ endif()
 
 set(ACC_MODE "host" CACHE STRING "OpenACC device: host, multicore, gpu")
 set(HEAT_OPTIMIZED OFF CACHE BOOL "Build with --optimized as default path")
+set(HEAT_MINFO OFF CACHE BOOL "Enable verbose -Minfo=all diagnostics")
 
 add_executable(heat_conduction ${HEAT_SOURCES})
 target_include_directories(heat_conduction PRIVATE ${Boost_INCLUDE_DIRS})
@@ -26,7 +27,11 @@ target_compile_definitions(heat_conduction PRIVATE ACC_MODE_STR="${ACC_MODE}")
 
 target_compile_options(
   heat_conduction
-  PRIVATE -O3 -acc=${ACC_MODE} -Minfo=all -fast)
+  PRIVATE -O3 -acc=${ACC_MODE} -fast)
+
+if(HEAT_MINFO)
+  target_compile_options(heat_conduction PRIVATE -Minfo=all)
+endif()
 
 if(HEAT_OPTIMIZED)
   target_compile_definitions(heat_conduction PRIVATE FORCE_OPTIMIZED=1)
