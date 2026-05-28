@@ -74,14 +74,15 @@ namespace
   }
 
   /** Fast Jacobi step without residual reduction. */
-  void jacobi_step_noerr(double *cur, double *next, int n, std::size_t sz,
+  void jacobi_step_noerr(double *__restrict cur, double *__restrict next, int n,
+                         std::size_t sz,
                          bool use_tiled)
   {
     const std::size_t sn = static_cast<std::size_t>(n);
 
     if (use_tiled)
     {
-#pragma acc parallel loop tile(32, 32) vector_length(256) \
+#pragma acc parallel loop tile(32, 32) vector_length(256) async(1) \
     present(cur[:sz], next[:sz])
       for (int i = 1; i < n - 1; ++i)
       {
@@ -97,7 +98,7 @@ namespace
     }
     else
     {
-#pragma acc parallel loop collapse(2) vector_length(256) \
+#pragma acc parallel loop collapse(2) vector_length(256) async(1) \
     present(cur[:sz], next[:sz])
       for (int i = 1; i < n - 1; ++i)
       {
@@ -114,14 +115,16 @@ namespace
   }
 
   /** Jacobi step with residual reduction (use only for convergence checks). */
-  void jacobi_step_err(double *cur, double *next, int n, std::size_t sz,
+  void jacobi_step_err(double *__restrict cur, double *__restrict next, int n,
+                       std::size_t sz,
                        double &err, bool use_tiled)
   {
     const std::size_t sn = static_cast<std::size_t>(n);
 
     if (use_tiled)
     {
-#pragma acc parallel loop tile(32, 32) vector_length(256) reduction(max : err) \
+#pragma acc parallel loop tile(32, 32) vector_length(256) async(1) \
+    reduction(max : err) \
     present(cur[:sz], next[:sz])
       for (int i = 1; i < n - 1; ++i)
       {
@@ -139,7 +142,8 @@ namespace
     }
     else
     {
-#pragma acc parallel loop collapse(2) vector_length(256) reduction(max : err) \
+#pragma acc parallel loop collapse(2) vector_length(256) async(1) \
+    reduction(max : err) \
     present(cur[:sz], next[:sz])
       for (int i = 1; i < n - 1; ++i)
       {
@@ -235,6 +239,7 @@ namespace
         write_to_new = !write_to_new;
         ++iter;
 
+#pragma acc wait(1)
 #pragma acc update host(err)
 
         err_host = err;
@@ -272,6 +277,7 @@ int main(int argc, char **argv)
     double eps = 1e-6;
     int max_iters = 1000000;
     bool optimized = false;
+    bool tiled = false;
     bool print_grid_flag = false;
     bool quiet = false;
     int check_interval = 1;
@@ -285,7 +291,9 @@ int main(int argc, char **argv)
         "max-iters,m", po::value<int>(&max_iters)->default_value(1000000),
         "maximum iterations")(
         "optimized,o", po::bool_switch(&optimized),
-        "optimized: tiled Jacobi, async kernels, batched convergence checks")(
+        "optimized: async kernels + batched convergence checks")(
+        "tiled,t", po::bool_switch(&tiled),
+        "use tile(32,32) kernel (can be slower on some GPUs)")(
         "check-interval,c", po::value<int>(&check_interval)->default_value(1),
         "sync host every N iterations (1=every iter; try 10-100 on GPU)")(
         "print-grid,p", po::bool_switch(&print_grid_flag),
@@ -331,8 +339,10 @@ int main(int argc, char **argv)
 
     double *solution = u.data();
 
+    const bool use_tiled_kernel = tiled;
     const SolveResult result = solve_acc(u, u_new, n, eps, max_iters, solution,
-                                       optimized, sync_host, check_interval);
+                                         use_tiled_kernel, sync_host,
+                                         check_interval);
 
     if (!quiet)
     {
@@ -344,6 +354,7 @@ int main(int argc, char **argv)
       std::cout << "acc_mode=unknown\n";
 #endif
       std::cout << "grid=" << n << "x" << n << '\n';
+      std::cout << "tiled=" << (use_tiled_kernel ? "on" : "off") << '\n';
       std::cout << "check_interval=" << check_interval << '\n';
       std::cout << "iterations=" << result.iterations << '\n';
       std::cout << "error=" << result.error << '\n';
