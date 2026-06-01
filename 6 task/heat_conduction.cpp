@@ -1,5 +1,4 @@
 #include <boost/program_options.hpp>
-#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -19,8 +18,6 @@ namespace
   constexpr double kCornerTL = 20.0;
   constexpr int kMaxIterations = 1'000'000;
   constexpr int kErrorCheckPeriod = 10000;
-  constexpr int kMinGridForBatch = 32;
-  constexpr int kMinCheckPeriodForBatch = 100;
 
   inline std::size_t idx(int j, int i, int m) noexcept
   {
@@ -151,102 +148,6 @@ namespace
     }
   }
 
-  /* Many no-error steps in one launch; current field in buf_a. */
-  void jacobi_batch_no_error_from_a(double *buf_a, double *buf_b, int m, int n,
-                                    int steps)
-  {
-    if (steps <= 0)
-    {
-      return;
-    }
-
-    const int nn = m * n;
-
-#pragma acc parallel async(1) present(buf_a[0:nn], buf_b[0:nn])
-    {
-#pragma acc loop seq
-      for (int s = 0; s < steps; ++s)
-      {
-        if (s % 2 == 0)
-        {
-#pragma acc loop collapse(2)
-          for (int j = 1; j < n - 1; ++j)
-          {
-            for (int i = 1; i < m - 1; ++i)
-            {
-              const std::size_t id = idx(j, i, m);
-              buf_b[id] =
-                  0.25 * (buf_a[idx(j, i + 1, m)] + buf_a[idx(j, i - 1, m)] +
-                          buf_a[idx(j - 1, i, m)] + buf_a[idx(j + 1, i, m)]);
-            }
-          }
-        }
-        else
-        {
-#pragma acc loop collapse(2)
-          for (int j = 1; j < n - 1; ++j)
-          {
-            for (int i = 1; i < m - 1; ++i)
-            {
-              const std::size_t id = idx(j, i, m);
-              buf_a[id] =
-                  0.25 * (buf_b[idx(j, i + 1, m)] + buf_b[idx(j, i - 1, m)] +
-                          buf_b[idx(j - 1, i, m)] + buf_b[idx(j + 1, i, m)]);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  /* Many no-error steps in one launch; current field in buf_b. */
-  void jacobi_batch_no_error_from_b(double *buf_a, double *buf_b, int m, int n,
-                                    int steps)
-  {
-    if (steps <= 0)
-    {
-      return;
-    }
-
-    const int nn = m * n;
-
-#pragma acc parallel async(1) present(buf_a[0:nn], buf_b[0:nn])
-    {
-#pragma acc loop seq
-      for (int s = 0; s < steps; ++s)
-      {
-        if (s % 2 == 0)
-        {
-#pragma acc loop collapse(2)
-          for (int j = 1; j < n - 1; ++j)
-          {
-            for (int i = 1; i < m - 1; ++i)
-            {
-              const std::size_t id = idx(j, i, m);
-              buf_a[id] =
-                  0.25 * (buf_b[idx(j, i + 1, m)] + buf_b[idx(j, i - 1, m)] +
-                          buf_b[idx(j - 1, i, m)] + buf_b[idx(j + 1, i, m)]);
-            }
-          }
-        }
-        else
-        {
-#pragma acc loop collapse(2)
-          for (int j = 1; j < n - 1; ++j)
-          {
-            for (int i = 1; i < m - 1; ++i)
-            {
-              const std::size_t id = idx(j, i, m);
-              buf_b[id] =
-                  0.25 * (buf_a[idx(j, i + 1, m)] + buf_a[idx(j, i - 1, m)] +
-                          buf_a[idx(j - 1, i, m)] + buf_a[idx(j + 1, i, m)]);
-            }
-          }
-        }
-      }
-    }
-  }
-
   void print_grid(const double *grid, int m, int n)
   {
     for (int j = 0; j < n; ++j)
@@ -339,74 +240,40 @@ int main(int argc, char **argv)
     double error = 1.0;
     int iter = 0;
     bool cur_is_a = true;
-    const bool use_batch_steps = (size >= kMinGridForBatch) &&
-                                 (error_check_period >= kMinCheckPeriodForBatch);
 
     const auto t0 = std::chrono::steady_clock::now();
 
 #pragma acc enter data copyin(buf_a[0:count], buf_b[0:count])
 
-    for (iter = 0; iter < max_iter;)
+    for (iter = 0; iter < max_iter; ++iter)
     {
-      const int next_check =
-          ((iter / error_check_period) + 1) * error_check_period;
-      const int chunk_end = std::min(next_check, max_iter);
-      const int noerr_steps = chunk_end - iter - 1;
-
-      if (noerr_steps > 0)
+      const bool check_error = ((iter + 1) % error_check_period == 0) ||
+                               (iter + 1 == max_iter);
+      if (check_error)
       {
-        if (use_batch_steps)
+#pragma acc wait(1)
+        if (cur_is_a)
         {
-          if (cur_is_a)
-          {
-            jacobi_batch_no_error_from_a(buf_a, buf_b, m, n, noerr_steps);
-          }
-          else
-          {
-            jacobi_batch_no_error_from_b(buf_a, buf_b, m, n, noerr_steps);
-          }
-          if (noerr_steps % 2 == 1)
-          {
-            cur_is_a = !cur_is_a;
-          }
+          error = jacobi_step_a_to_b(buf_a, buf_b, m, n);
         }
         else
         {
-          for (int k = 0; k < noerr_steps; ++k)
-          {
-            if (cur_is_a)
-            {
-              jacobi_step_no_error_a_to_b(buf_a, buf_b, m, n);
-            }
-            else
-            {
-              jacobi_step_no_error_b_to_a(buf_a, buf_b, m, n);
-            }
-            cur_is_a = !cur_is_a;
-          }
+          error = jacobi_step_b_to_a(buf_a, buf_b, m, n);
         }
-        iter += noerr_steps;
       }
-
-      if (iter >= max_iter)
+      else if (cur_is_a)
       {
-        break;
-      }
-
-#pragma acc wait(1)
-      if (cur_is_a)
-      {
-        error = jacobi_step_a_to_b(buf_a, buf_b, m, n);
+        jacobi_step_no_error_a_to_b(buf_a, buf_b, m, n);
       }
       else
       {
-        error = jacobi_step_b_to_a(buf_a, buf_b, m, n);
+        jacobi_step_no_error_b_to_a(buf_a, buf_b, m, n);
       }
       cur_is_a = !cur_is_a;
-      ++iter;
 
-      if (error <= tol)
+      if (check_error && error <= tol)
       {
+        ++iter;
         break;
       }
     }
