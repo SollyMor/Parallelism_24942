@@ -7,7 +7,6 @@
 #include <iostream>
 #include <string>
 #include <utility>
-#include <vector>
 
 namespace po = boost::program_options;
 
@@ -17,53 +16,107 @@ namespace
   constexpr double kCornerBR = 20.0;
   constexpr double kCornerTR = 30.0;
   constexpr double kCornerTL = 20.0;
-  constexpr int kDefaultErrorCheckPeriod = 10000;
   constexpr int kMaxIterations = 1'000'000;
+  constexpr int kErrorCheckPeriod = 10000;
 
-  inline std::size_t idx(int row, int col, int n) noexcept
+  inline std::size_t idx(int j, int i, int m) noexcept
   {
-    return static_cast<std::size_t>(row) * static_cast<std::size_t>(n) +
-           static_cast<std::size_t>(col);
+    return static_cast<std::size_t>(j) * static_cast<std::size_t>(m) +
+           static_cast<std::size_t>(i);
   }
 
-  void init_grid(double *grid, int n)
+  void set_boundary(double *grid, int m, int n)
   {
-    const std::size_t count =
-        static_cast<std::size_t>(n) * static_cast<std::size_t>(n);
-    std::memset(grid, 0, count * sizeof(double));
+    if (m <= 0 || n <= 0)
+    {
+      return;
+    }
 
-    const int nm1 = n - 1;
-    grid[idx(0, 0, n)] = kCornerBL;
-    grid[idx(0, nm1, n)] = kCornerBR;
-    grid[idx(nm1, nm1, n)] = kCornerTR;
-    grid[idx(nm1, 0, n)] = kCornerTL;
+    grid[idx(0, 0, m)] = kCornerBL;
+    grid[idx(0, m - 1, m)] = kCornerBR;
+    grid[idx(n - 1, m - 1, m)] = kCornerTR;
+    grid[idx(n - 1, 0, m)] = kCornerTL;
+
+    if (m > 2)
+    {
+      const double denom = static_cast<double>(m - 1);
+      for (int i = 1; i < m - 1; ++i)
+      {
+        const double t = static_cast<double>(i) / denom;
+        grid[idx(0, i, m)] = kCornerBL + (kCornerBR - kCornerBL) * t;
+        grid[idx(n - 1, i, m)] = kCornerTL + (kCornerTR - kCornerTL) * t;
+      }
+    }
 
     if (n > 2)
     {
-      const double inv = 1.0 / static_cast<double>(nm1);
-      for (int i = 1; i < nm1; ++i)
+      const double denom = static_cast<double>(n - 1);
+      for (int j = 1; j < n - 1; ++j)
       {
-        const double t = static_cast<double>(i) * inv;
-        grid[idx(0, i, n)] = kCornerBL + (kCornerBR - kCornerBL) * t;
-        grid[idx(nm1, i, n)] = kCornerTL + (kCornerTR - kCornerTL) * t;
-      }
-      for (int j = 1; j < nm1; ++j)
-      {
-        const double t = static_cast<double>(j) * inv;
-        grid[idx(j, 0, n)] = kCornerBL + (kCornerTL - kCornerBL) * t;
-        grid[idx(j, nm1, n)] = kCornerBR + (kCornerTR - kCornerBR) * t;
+        const double t = static_cast<double>(j) / denom;
+        grid[idx(j, 0, m)] = kCornerBL + (kCornerTL - kCornerBL) * t;
+        grid[idx(j, m - 1, m)] = kCornerBR + (kCornerTR - kCornerBR) * t;
       }
     }
   }
 
-  void print_grid(const double *grid, int n)
+  void initialize(double *a, double *anew, int m, int n)
   {
-    for (int row = 0; row < n; ++row)
+    const std::size_t count =
+        static_cast<std::size_t>(m) * static_cast<std::size_t>(n);
+    std::memset(a, 0, count * sizeof(double));
+    std::memset(anew, 0, count * sizeof(double));
+    set_boundary(a, m, n);
+    set_boundary(anew, m, n);
+  }
+
+  double jacobi_step(double *a, double *anew, int m, int n)
+  {
+    double error = 0.0;
+    const int nn = m * n;
+
+#pragma acc parallel loop collapse(2) present(a[0:nn], anew[0:nn]) \
+    reduction(max : error) async(1)
+    for (int j = 1; j < n - 1; ++j)
     {
-      for (int col = 0; col < n; ++col)
+      for (int i = 1; i < m - 1; ++i)
       {
-        std::printf("%10.6f", grid[idx(row, col, n)]);
-        if (col + 1 < n)
+        const std::size_t id = idx(j, i, m);
+        const double new_val = 0.25 * (a[idx(j, i + 1, m)] + a[idx(j, i - 1, m)] +
+                                       a[idx(j - 1, i, m)] + a[idx(j + 1, i, m)]);
+        anew[id] = new_val;
+        error = std::fmax(error, std::fabs(new_val - a[id]));
+      }
+    }
+#pragma acc wait(1)
+
+    return error;
+  }
+
+  void jacobi_step_no_error(double *a, double *anew, int m, int n)
+  {
+    const int nn = m * n;
+
+#pragma acc parallel loop collapse(2) present(a[0:nn], anew[0:nn]) async(1)
+    for (int j = 1; j < n - 1; ++j)
+    {
+      for (int i = 1; i < m - 1; ++i)
+      {
+        const std::size_t id = idx(j, i, m);
+        anew[id] = 0.25 * (a[idx(j, i + 1, m)] + a[idx(j, i - 1, m)] +
+                           a[idx(j - 1, i, m)] + a[idx(j + 1, i, m)]);
+      }
+    }
+  }
+
+  void print_grid(const double *a, int m, int n)
+  {
+    for (int j = 0; j < n; ++j)
+    {
+      for (int i = 0; i < m; ++i)
+      {
+        std::printf("%10.6f", a[idx(j, i, m)]);
+        if (i + 1 < m)
         {
           std::printf(" ");
         }
@@ -72,196 +125,32 @@ namespace
     }
   }
 
-  void jacobi_step_noerr(double *cur, double *next, int n, int nn, bool use_tiled)
-  {
-    if (use_tiled)
-    {
-#pragma acc parallel loop tile(32, 32) present(cur[0:nn], next[0:nn]) async(1)
-      for (int row = 1; row < n - 1; ++row)
-      {
-        for (int col = 1; col < n - 1; ++col)
-        {
-          const std::size_t id = idx(row, col, n);
-          next[id] = 0.25 * (cur[idx(row, col + 1, n)] + cur[idx(row, col - 1, n)] +
-                             cur[idx(row - 1, col, n)] + cur[idx(row + 1, col, n)]);
-        }
-      }
-    }
-    else
-    {
-#pragma acc parallel loop collapse(2) present(cur[0:nn], next[0:nn]) async(1)
-      for (int row = 1; row < n - 1; ++row)
-      {
-        for (int col = 1; col < n - 1; ++col)
-        {
-          const std::size_t id = idx(row, col, n);
-          next[id] = 0.25 * (cur[idx(row, col + 1, n)] + cur[idx(row, col - 1, n)] +
-                             cur[idx(row - 1, col, n)] + cur[idx(row + 1, col, n)]);
-        }
-      }
-    }
-  }
-
-  /** Batched steps; s-loop must be sequential (Jacobi depends on previous step). */
-  void jacobi_batch_noerr(double *u, double *v, int n, int nn, int steps,
-                          bool use_tiled)
-  {
-    if (steps <= 0)
-    {
-      return;
-    }
-
-    if (use_tiled)
-    {
-#pragma acc parallel async(1) present(u[0:nn], v[0:nn])
-      {
-#pragma acc loop seq
-        for (int s = 0; s < steps; ++s)
-        {
-          if (s % 2 == 0)
-          {
-#pragma acc loop tile(32, 32)
-            for (int row = 1; row < n - 1; ++row)
-            {
-              for (int col = 1; col < n - 1; ++col)
-              {
-                const std::size_t id = idx(row, col, n);
-                v[id] = 0.25 * (u[idx(row, col + 1, n)] + u[idx(row, col - 1, n)] +
-                                u[idx(row - 1, col, n)] + u[idx(row + 1, col, n)]);
-              }
-            }
-          }
-          else
-          {
-#pragma acc loop tile(32, 32)
-            for (int row = 1; row < n - 1; ++row)
-            {
-              for (int col = 1; col < n - 1; ++col)
-              {
-                const std::size_t id = idx(row, col, n);
-                u[id] = 0.25 * (v[idx(row, col + 1, n)] + v[idx(row, col - 1, n)] +
-                                v[idx(row - 1, col, n)] + v[idx(row + 1, col, n)]);
-              }
-            }
-          }
-        }
-      }
-    }
-    else
-    {
-#pragma acc parallel async(1) present(u[0:nn], v[0:nn])
-      {
-#pragma acc loop seq
-        for (int s = 0; s < steps; ++s)
-        {
-          if (s % 2 == 0)
-          {
-#pragma acc loop collapse(2)
-            for (int row = 1; row < n - 1; ++row)
-            {
-              for (int col = 1; col < n - 1; ++col)
-              {
-                const std::size_t id = idx(row, col, n);
-                v[id] = 0.25 * (u[idx(row, col + 1, n)] + u[idx(row, col - 1, n)] +
-                                u[idx(row - 1, col, n)] + u[idx(row + 1, col, n)]);
-              }
-            }
-          }
-          else
-          {
-#pragma acc loop collapse(2)
-            for (int row = 1; row < n - 1; ++row)
-            {
-              for (int col = 1; col < n - 1; ++col)
-              {
-                const std::size_t id = idx(row, col, n);
-                u[id] = 0.25 * (v[idx(row, col + 1, n)] + v[idx(row, col - 1, n)] +
-                                v[idx(row - 1, col, n)] + v[idx(row + 1, col, n)]);
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  double jacobi_step_err(double *cur, double *next, int n, int nn, bool use_tiled)
-  {
-    double error = 0.0;
-
-    if (use_tiled)
-    {
-#pragma acc parallel loop tile(32, 32) present(cur[0:nn], next[0:nn]) \
-    reduction(max : error) async(1)
-      for (int row = 1; row < n - 1; ++row)
-      {
-        for (int col = 1; col < n - 1; ++col)
-        {
-          const std::size_t id = idx(row, col, n);
-          const double new_val = 0.25 * (cur[idx(row, col + 1, n)] +
-                                         cur[idx(row, col - 1, n)] +
-                                         cur[idx(row - 1, col, n)] +
-                                         cur[idx(row + 1, col, n)]);
-          next[id] = new_val;
-          error = std::fmax(error, std::fabs(new_val - cur[id]));
-        }
-      }
-    }
-    else
-    {
-#pragma acc parallel loop collapse(2) present(cur[0:nn], next[0:nn]) \
-    reduction(max : error) async(1)
-      for (int row = 1; row < n - 1; ++row)
-      {
-        for (int col = 1; col < n - 1; ++col)
-        {
-          const std::size_t id = idx(row, col, n);
-          const double new_val = 0.25 * (cur[idx(row, col + 1, n)] +
-                                         cur[idx(row, col - 1, n)] +
-                                         cur[idx(row - 1, col, n)] +
-                                         cur[idx(row + 1, col, n)]);
-          next[id] = new_val;
-          error = std::fmax(error, std::fabs(new_val - cur[id]));
-        }
-      }
-    }
-
-    return error;
-  }
-
 } // namespace
 
 int main(int argc, char **argv)
 {
   try
   {
-    int grid_size = 128;
-    double eps = 1e-6;
-    int max_iters = kMaxIterations;
-    bool optimized = false;
-    bool tiled = false;
-    bool print_grid_flag = false;
+    int size = 128;
+    double tol = 1.0e-6;
+    int max_iter = kMaxIterations;
     bool quiet = false;
-    int check_interval = kDefaultErrorCheckPeriod;
+    int error_check_period = kErrorCheckPeriod;
 
     po::options_description desc("2D heat equation (five-point Jacobi), OpenACC");
     desc.add_options()("help,h", "print help")(
-        "size,s", po::value<int>(&grid_size)->default_value(128),
-        "grid dimension N (N x N)")(
-        "eps,e", po::value<double>(&eps)->default_value(1e-6),
+        "size,s", po::value<int>(&size)->default_value(128), "grid size NxN")(
+        "eps,e", po::value<double>(&tol)->default_value(1.0e-6),
         "convergence tolerance")(
-        "max-iters,m", po::value<int>(&max_iters)->default_value(kMaxIterations),
+        "tol,t", po::value<double>(&tol), "alias for --eps")(
+        "max-iters,m", po::value<int>(&max_iter)->default_value(kMaxIterations),
         "maximum iterations")(
-        "optimized,o", po::bool_switch(&optimized),
-        "check convergence every 100 iterations (default: 10000)")(
-        "tiled,t", po::bool_switch(&tiled),
-        "use tile(32,32) kernel (can be slower on some GPUs)")(
-        "check-interval,c", po::value<int>(&check_interval),
-        "host sync / error check every N iterations (default 10000)")(
-        "print-grid,p", po::bool_switch(&print_grid_flag),
-        "print full grid (auto for N=10 or N=13)")(
+        "max-iter,i", po::value<int>(&max_iter), "alias for --max-iters")(
+        "check-interval,c", po::value<int>(&error_check_period),
+        "error check period (default 10000, same as laplace2d)")(
         "quiet,q", po::bool_switch(&quiet),
-        "compact output: time_sec iter error (like laplace2d)");
+        "output: time_sec iter error")(
+        "print-grid,p", po::bool_switch(), "print grid (also for N=10,13)");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -273,121 +162,78 @@ int main(int argc, char **argv)
       return 0;
     }
 
-#ifdef FORCE_OPTIMIZED
-    optimized = true;
-#endif
-
-    if (optimized && !vm.count("check-interval"))
+    if (size < 3)
     {
-      check_interval = 100;
-    }
-
-    if (check_interval < 1)
-    {
-      std::cerr << "check-interval must be >= 1\n";
+      std::cerr << "Grid size must be at least 3\n";
       return 1;
     }
 
-    const bool verify_grid = (grid_size == 10 || grid_size == 13);
-    if (verify_grid && !vm.count("check-interval"))
+    if (max_iter < 1)
     {
-      check_interval = 1;
-    }
-
-    if (grid_size < 3)
-    {
-      std::cerr << "Grid size must be >= 3\n";
+      std::cerr << "max-iters must be at least 1\n";
       return 1;
     }
-
-    if (max_iters < 1)
-    {
-      std::cerr << "max-iters must be >= 1\n";
-      return 1;
-    }
-    if (max_iters > kMaxIterations)
+    if (max_iter > kMaxIterations)
     {
       std::cerr << "max-iters capped at " << kMaxIterations << '\n';
-      max_iters = kMaxIterations;
+      max_iter = kMaxIterations;
     }
 
-    const int n = grid_size;
-    const int nn = n * n;
-    const std::size_t count = static_cast<std::size_t>(nn);
-    const bool use_batch_kernels = (n >= 64);
+    if (!vm.count("check-interval"))
+    {
+      error_check_period = kErrorCheckPeriod;
+    }
+    if (error_check_period < 1)
+    {
+      std::cerr << "check-interval must be at least 1\n";
+      return 1;
+    }
 
-    std::vector<double> u(count);
-    std::vector<double> u_new(count);
-    init_grid(u.data(), n);
-    init_grid(u_new.data(), n);
+    const int m = size;
+    const int n = size;
+    const std::size_t count =
+        static_cast<std::size_t>(m) * static_cast<std::size_t>(n);
 
-    double *cur = u.data();
-    double *next = u_new.data();
+    double *a = new double[count];
+    double *anew = new double[count];
+    initialize(a, anew, m, n);
 
     double error = 1.0;
     int iter = 0;
 
     const auto t0 = std::chrono::steady_clock::now();
 
-#pragma acc enter data copyin(cur[0:count], next[0:count])
+#pragma acc enter data copyin(a[0:count], anew[0:count])
 
-    for (iter = 0; iter < max_iters;)
+    for (iter = 0; iter < max_iter; ++iter)
     {
-      const int next_check =
-          ((iter / check_interval) + 1) * check_interval;
-      const int chunk_end = std::min(next_check, max_iters);
-      const int chunk = chunk_end - iter;
-      const int noerr_steps = chunk - 1;
-
-      if (noerr_steps > 0)
+      const bool check_error = ((iter + 1) % error_check_period == 0) ||
+                               (iter + 1 == max_iter);
+      if (check_error)
       {
-        if (use_batch_kernels)
-        {
-          jacobi_batch_noerr(cur, next, n, nn, noerr_steps, tiled);
-          if (noerr_steps % 2 == 1)
-          {
-            std::swap(cur, next);
-          }
-        }
-        else
-        {
-          for (int k = 0; k < noerr_steps; ++k)
-          {
-            jacobi_step_noerr(cur, next, n, nn, tiled);
-            std::swap(cur, next);
-          }
-        }
-        iter += noerr_steps;
+        error = jacobi_step(a, anew, m, n);
       }
-
-      if (iter >= max_iters)
+      else
       {
-        break;
+        jacobi_step_no_error(a, anew, m, n);
       }
-
-#pragma acc wait(1)
-      error = jacobi_step_err(cur, next, n, nn, tiled);
-#pragma acc wait(1)
-      std::swap(cur, next);
-      ++iter;
-
-      if (error <= eps)
+      std::swap(a, anew);
+      if (check_error && error <= tol)
       {
+        ++iter;
         break;
       }
     }
 
-    const bool sync_host = print_grid_flag || verify_grid;
-    if (sync_host)
-    {
-#pragma acc update host(cur[0:count])
-    }
-
-#pragma acc exit data delete(cur[0:count], next[0:count])
+#pragma acc wait(1)
+#pragma acc exit data delete(a[0:count], anew[0:count])
 
     const auto t1 = std::chrono::steady_clock::now();
     const double elapsed =
         std::chrono::duration<double>(t1 - t0).count();
+
+    const bool show_grid =
+        vm.count("print-grid") || size == 10 || size == 13;
 
     if (quiet)
     {
@@ -400,19 +246,21 @@ int main(int argc, char **argv)
 #ifdef ACC_MODE_STR
       std::cout << "acc_mode=" << ACC_MODE_STR << '\n';
 #endif
-      std::cout << "grid=" << n << "x" << n << '\n';
-      std::cout << "check_interval=" << check_interval << '\n';
-      std::cout << "tiled=" << (tiled ? "on" : "off") << '\n';
+      std::cout << "grid=" << m << "x" << n << '\n';
+      std::cout << "check_interval=" << error_check_period << '\n';
       std::cout << "iterations=" << iter << '\n';
       std::cout << "error=" << error << '\n';
       std::cout << "time_sec=" << std::fixed << std::setprecision(6) << elapsed
                 << '\n';
     }
 
-    if (sync_host)
+    if (show_grid)
     {
-      print_grid(cur, n);
+      print_grid(a, m, n);
     }
+
+    delete[] a;
+    delete[] anew;
   }
   catch (const std::exception &ex)
   {
