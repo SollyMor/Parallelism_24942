@@ -60,62 +60,65 @@ namespace
     }
   }
 
-  void initialize(double *a, double *anew, int m, int n)
+  void initialize(double *buf_a, double *buf_b, int m, int n)
   {
     const std::size_t count =
         static_cast<std::size_t>(m) * static_cast<std::size_t>(n);
-    std::memset(a, 0, count * sizeof(double));
-    std::memset(anew, 0, count * sizeof(double));
-    set_boundary(a, m, n);
-    set_boundary(anew, m, n);
+    std::memset(buf_a, 0, count * sizeof(double));
+    std::memset(buf_b, 0, count * sizeof(double));
+    set_boundary(buf_a, m, n);
+    set_boundary(buf_b, m, n);
   }
 
-  double jacobi_step(double *a, double *anew, int m, int n)
+  /* Always present(buf_a, buf_b); cur/next are aliases (no pointer swap on host). */
+  double jacobi_step(double *buf_a, double *buf_b, double *cur, double *next,
+                     int m, int n)
   {
     double error = 0.0;
     const int nn = m * n;
 
-#pragma acc parallel loop collapse(2) present(a[0:nn], anew[0:nn]) \
-    reduction(max : error) async(1)
+#pragma acc parallel loop collapse(2) present(buf_a[0:nn], buf_b[0:nn]) \
+    reduction(max : error)
     for (int j = 1; j < n - 1; ++j)
     {
       for (int i = 1; i < m - 1; ++i)
       {
         const std::size_t id = idx(j, i, m);
-        const double new_val = 0.25 * (a[idx(j, i + 1, m)] + a[idx(j, i - 1, m)] +
-                                       a[idx(j - 1, i, m)] + a[idx(j + 1, i, m)]);
-        anew[id] = new_val;
-        error = std::fmax(error, std::fabs(new_val - a[id]));
+        const double new_val =
+            0.25 * (cur[idx(j, i + 1, m)] + cur[idx(j, i - 1, m)] +
+                    cur[idx(j - 1, i, m)] + cur[idx(j + 1, i, m)]);
+        next[id] = new_val;
+        error = std::fmax(error, std::fabs(new_val - cur[id]));
       }
     }
-#pragma acc wait(1)
 
     return error;
   }
 
-  void jacobi_step_no_error(double *a, double *anew, int m, int n)
+  void jacobi_step_no_error(double *buf_a, double *buf_b, double *cur,
+                            double *next, int m, int n)
   {
     const int nn = m * n;
 
-#pragma acc parallel loop collapse(2) present(a[0:nn], anew[0:nn]) async(1)
+#pragma acc parallel loop collapse(2) present(buf_a[0:nn], buf_b[0:nn]) async(1)
     for (int j = 1; j < n - 1; ++j)
     {
       for (int i = 1; i < m - 1; ++i)
       {
         const std::size_t id = idx(j, i, m);
-        anew[id] = 0.25 * (a[idx(j, i + 1, m)] + a[idx(j, i - 1, m)] +
-                           a[idx(j - 1, i, m)] + a[idx(j + 1, i, m)]);
+        next[id] = 0.25 * (cur[idx(j, i + 1, m)] + cur[idx(j, i - 1, m)] +
+                           cur[idx(j - 1, i, m)] + cur[idx(j + 1, i, m)]);
       }
     }
   }
 
-  void print_grid(const double *a, int m, int n)
+  void print_grid(const double *grid, int m, int n)
   {
     for (int j = 0; j < n; ++j)
     {
       for (int i = 0; i < m; ++i)
       {
-        std::printf("%10.6f", a[idx(j, i, m)]);
+        std::printf("%10.6f", grid[idx(j, i, m)]);
         if (i + 1 < m)
         {
           std::printf(" ");
@@ -147,7 +150,7 @@ int main(int argc, char **argv)
         "maximum iterations")(
         "max-iter,i", po::value<int>(&max_iter), "alias for --max-iters")(
         "check-interval,c", po::value<int>(&error_check_period),
-        "error check period (default 10000, same as laplace2d)")(
+        "error check period (default 10000)")(
         "quiet,q", po::bool_switch(&quiet),
         "output: time_sec iter error")(
         "print-grid,p", po::bool_switch(), "print grid (also for N=10,13)");
@@ -183,6 +186,10 @@ int main(int argc, char **argv)
     {
       error_check_period = kErrorCheckPeriod;
     }
+    if (size == 10 || size == 13)
+    {
+      error_check_period = 1;
+    }
     if (error_check_period < 1)
     {
       std::cerr << "check-interval must be at least 1\n";
@@ -194,30 +201,36 @@ int main(int argc, char **argv)
     const std::size_t count =
         static_cast<std::size_t>(m) * static_cast<std::size_t>(n);
 
-    double *a = new double[count];
-    double *anew = new double[count];
-    initialize(a, anew, m, n);
+    double *const buf_a = new double[count];
+    double *const buf_b = new double[count];
+    initialize(buf_a, buf_b, m, n);
 
     double error = 1.0;
     int iter = 0;
+    bool cur_is_a = true;
 
     const auto t0 = std::chrono::steady_clock::now();
 
-#pragma acc enter data copyin(a[0:count], anew[0:count])
+#pragma acc enter data copyin(buf_a[0:count], buf_b[0:count])
 
     for (iter = 0; iter < max_iter; ++iter)
     {
+      double *cur = cur_is_a ? buf_a : buf_b;
+      double *next = cur_is_a ? buf_b : buf_a;
+
       const bool check_error = ((iter + 1) % error_check_period == 0) ||
                                (iter + 1 == max_iter);
       if (check_error)
       {
-        error = jacobi_step(a, anew, m, n);
+#pragma acc wait(1)
+        error = jacobi_step(buf_a, buf_b, cur, next, m, n);
       }
       else
       {
-        jacobi_step_no_error(a, anew, m, n);
+        jacobi_step_no_error(buf_a, buf_b, cur, next, m, n);
       }
-      std::swap(a, anew);
+      cur_is_a = !cur_is_a;
+
       if (check_error && error <= tol)
       {
         ++iter;
@@ -226,14 +239,21 @@ int main(int argc, char **argv)
     }
 
 #pragma acc wait(1)
-#pragma acc exit data delete(a[0:count], anew[0:count])
+
+    double *solution = cur_is_a ? buf_a : buf_b;
+
+    const bool show_grid =
+        vm.count("print-grid") || size == 10 || size == 13;
+    if (show_grid)
+    {
+#pragma acc update host(solution[0:count])
+    }
+
+#pragma acc exit data delete(buf_a[0:count], buf_b[0:count])
 
     const auto t1 = std::chrono::steady_clock::now();
     const double elapsed =
         std::chrono::duration<double>(t1 - t0).count();
-
-    const bool show_grid =
-        vm.count("print-grid") || size == 10 || size == 13;
 
     if (quiet)
     {
@@ -256,11 +276,11 @@ int main(int argc, char **argv)
 
     if (show_grid)
     {
-      print_grid(a, m, n);
+      print_grid(solution, m, n);
     }
 
-    delete[] a;
-    delete[] anew;
+    delete[] buf_a;
+    delete[] buf_b;
   }
   catch (const std::exception &ex)
   {
