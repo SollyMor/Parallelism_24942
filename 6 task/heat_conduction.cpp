@@ -72,31 +72,64 @@ namespace
     }
   }
 
-  void jacobi_step_noerr(double *cur, double *next, int n, int nn, bool use_tiled)
+  /** Many Jacobi steps in one GPU launch (cuts kernel launch overhead). */
+  void jacobi_batch_noerr(double *u, double *v, int n, int nn, int steps,
+                          bool use_tiled)
   {
+    if (steps <= 0)
+    {
+      return;
+    }
+
     if (use_tiled)
     {
-#pragma acc parallel loop tile(32, 32) present(cur[0:nn], next[0:nn]) async(1)
-      for (int row = 1; row < n - 1; ++row)
+#pragma acc parallel async(1) present(u[0:nn], v[0:nn])
       {
-        for (int col = 1; col < n - 1; ++col)
+        double *cur = u;
+        double *nxt = v;
+        for (int s = 0; s < steps; ++s)
         {
-          const std::size_t id = idx(row, col, n);
-          next[id] = 0.25 * (cur[idx(row, col + 1, n)] + cur[idx(row, col - 1, n)] +
-                             cur[idx(row - 1, col, n)] + cur[idx(row + 1, col, n)]);
+#pragma acc loop tile(32, 32)
+          for (int row = 1; row < n - 1; ++row)
+          {
+            for (int col = 1; col < n - 1; ++col)
+            {
+              const std::size_t id = idx(row, col, n);
+              nxt[id] = 0.25 * (cur[idx(row, col + 1, n)] +
+                                cur[idx(row, col - 1, n)] +
+                                cur[idx(row - 1, col, n)] +
+                                cur[idx(row + 1, col, n)]);
+            }
+          }
+          double *const tmp = cur;
+          cur = nxt;
+          nxt = tmp;
         }
       }
     }
     else
     {
-#pragma acc parallel loop collapse(2) present(cur[0:nn], next[0:nn]) async(1)
-      for (int row = 1; row < n - 1; ++row)
+#pragma acc parallel async(1) present(u[0:nn], v[0:nn])
       {
-        for (int col = 1; col < n - 1; ++col)
+        double *cur = u;
+        double *nxt = v;
+        for (int s = 0; s < steps; ++s)
         {
-          const std::size_t id = idx(row, col, n);
-          next[id] = 0.25 * (cur[idx(row, col + 1, n)] + cur[idx(row, col - 1, n)] +
-                             cur[idx(row - 1, col, n)] + cur[idx(row + 1, col, n)]);
+#pragma acc loop collapse(2)
+          for (int row = 1; row < n - 1; ++row)
+          {
+            for (int col = 1; col < n - 1; ++col)
+            {
+              const std::size_t id = idx(row, col, n);
+              nxt[id] = 0.25 * (cur[idx(row, col + 1, n)] +
+                                cur[idx(row, col - 1, n)] +
+                                cur[idx(row - 1, col, n)] +
+                                cur[idx(row + 1, col, n)]);
+            }
+          }
+          double *const tmp = cur;
+          cur = nxt;
+          nxt = tmp;
         }
       }
     }
@@ -143,7 +176,6 @@ namespace
       }
     }
 
-#pragma acc wait(1)
     return error;
   }
 
@@ -175,7 +207,7 @@ int main(int argc, char **argv)
         "tiled,t", po::bool_switch(&tiled),
         "use tile(32,32) kernel (can be slower on some GPUs)")(
         "check-interval,c", po::value<int>(&check_interval),
-        "sync host every N iterations (default 10000)")(
+        "host sync / error check every N iterations (default 10000)")(
         "print-grid,p", po::bool_switch(&print_grid_flag),
         "print full grid (auto for N=10 or N=13)")(
         "quiet,q", po::bool_switch(&quiet),
@@ -242,27 +274,40 @@ int main(int argc, char **argv)
 
 #pragma acc enter data copyin(cur[0:count], next[0:count])
 
-    for (iter = 0; iter < max_iters; ++iter)
+    while (iter < max_iters && error > eps)
     {
-      const bool check_error =
-          ((iter + 1) % check_interval == 0) || (iter + 1 == max_iters);
-      if (check_error)
+      const int next_check =
+          ((iter / check_interval) + 1) * check_interval;
+      const int chunk_end = std::min(next_check, max_iters);
+      const int chunk = chunk_end - iter;
+      const int noerr_steps = chunk - 1;
+
+      if (noerr_steps > 0)
       {
-        error = jacobi_step_err(cur, next, n, nn, tiled);
+        jacobi_batch_noerr(cur, next, n, nn, noerr_steps, tiled);
+        if (noerr_steps % 2 == 1)
+        {
+          std::swap(cur, next);
+        }
+        iter += noerr_steps;
       }
-      else
+
+      if (iter >= max_iters)
       {
-        jacobi_step_noerr(cur, next, n, nn, tiled);
+        break;
       }
+
+#pragma acc wait(1)
+      error = jacobi_step_err(cur, next, n, nn, tiled);
+#pragma acc wait(1)
       std::swap(cur, next);
-      if (check_error && error <= eps)
+      ++iter;
+
+      if (error <= eps)
       {
-        ++iter;
         break;
       }
     }
-
-#pragma acc wait(1)
 
     const bool sync_host =
         print_grid_flag || grid_size == 10 || grid_size == 13;
