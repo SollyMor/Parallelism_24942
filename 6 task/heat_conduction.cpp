@@ -173,7 +173,6 @@ int main(int argc, char **argv)
     int size = 128;
     double tol = 1.0e-6;
     int max_iter = kMaxIterations;
-    bool quiet = false;
     int error_check_period = kErrorCheckPeriod;
 
     po::options_description desc("2D heat equation (five-point Jacobi), OpenACC");
@@ -186,10 +185,7 @@ int main(int argc, char **argv)
         "maximum iterations")(
         "max-iter,i", po::value<int>(&max_iter), "alias for --max-iters")(
         "check-interval,c", po::value<int>(&error_check_period),
-        "error check period (default 10000)")(
-        "quiet,q", po::bool_switch(&quiet),
-        "output: time_sec iter error")(
-        "print-grid,p", po::bool_switch(), "print grid (also for N=10,13)");
+        "error check period (default 10000)");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -286,9 +282,8 @@ int main(int argc, char **argv)
 
     double *solution = cur_is_a ? buf_a : buf_b;
 
-    const bool show_grid =
-        vm.count("print-grid") || size == 10 || size == 13;
-    if (show_grid)
+    const bool verify_grid = (size == 10 || size == 13);
+    if (verify_grid)
     {
 #pragma acc update host(solution[0:count])
     }
@@ -299,26 +294,10 @@ int main(int argc, char **argv)
     const double elapsed =
         std::chrono::duration<double>(t1 - t0).count();
 
-    if (quiet)
-    {
-      std::cout << std::fixed << std::setprecision(6) << elapsed << ' ' << iter
-                << ' ' << std::scientific << error << '\n';
-    }
-    else
-    {
-      std::cout << std::scientific << std::setprecision(6);
-#ifdef ACC_MODE_STR
-      std::cout << "acc_mode=" << ACC_MODE_STR << '\n';
-#endif
-      std::cout << "grid=" << m << "x" << n << '\n';
-      std::cout << "check_interval=" << error_check_period << '\n';
-      std::cout << "iterations=" << iter << '\n';
-      std::cout << "error=" << error << '\n';
-      std::cout << "time_sec=" << std::fixed << std::setprecision(6) << elapsed
-                << '\n';
-    }
+    std::cout << std::fixed << std::setprecision(6) << elapsed << ' ' << iter
+              << ' ' << std::scientific << error << '\n';
 
-    if (show_grid)
+    if (verify_grid)
     {
       print_grid(solution, m, n);
     }
