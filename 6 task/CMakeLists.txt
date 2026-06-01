@@ -30,6 +30,11 @@ target_compile_options(
   heat_conduction
   PRIVATE -O3 -acc=${ACC_MODE} -fast)
 
+if(ACC_MODE STREQUAL "multicore")
+  target_compile_options(heat_conduction PRIVATE -mp -Mconcur)
+  target_link_options(heat_conduction PRIVATE -mp -Mconcur)
+endif()
+
 if(ACC_MODE STREQUAL "gpu")
   target_compile_options(heat_conduction PRIVATE -gpu=${GPU_ARCH})
 endif()
