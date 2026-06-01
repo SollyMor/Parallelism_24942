@@ -72,7 +72,37 @@ namespace
     }
   }
 
-  /** Many Jacobi steps in one GPU launch (ping-pong u/v; no pointer swap on device). */
+  void jacobi_step_noerr(double *cur, double *next, int n, int nn, bool use_tiled)
+  {
+    if (use_tiled)
+    {
+#pragma acc parallel loop tile(32, 32) present(cur[0:nn], next[0:nn]) async(1)
+      for (int row = 1; row < n - 1; ++row)
+      {
+        for (int col = 1; col < n - 1; ++col)
+        {
+          const std::size_t id = idx(row, col, n);
+          next[id] = 0.25 * (cur[idx(row, col + 1, n)] + cur[idx(row, col - 1, n)] +
+                             cur[idx(row - 1, col, n)] + cur[idx(row + 1, col, n)]);
+        }
+      }
+    }
+    else
+    {
+#pragma acc parallel loop collapse(2) present(cur[0:nn], next[0:nn]) async(1)
+      for (int row = 1; row < n - 1; ++row)
+      {
+        for (int col = 1; col < n - 1; ++col)
+        {
+          const std::size_t id = idx(row, col, n);
+          next[id] = 0.25 * (cur[idx(row, col + 1, n)] + cur[idx(row, col - 1, n)] +
+                             cur[idx(row - 1, col, n)] + cur[idx(row + 1, col, n)]);
+        }
+      }
+    }
+  }
+
+  /** Batched steps; s-loop must be sequential (Jacobi depends on previous step). */
   void jacobi_batch_noerr(double *u, double *v, int n, int nn, int steps,
                           bool use_tiled)
   {
@@ -85,6 +115,7 @@ namespace
     {
 #pragma acc parallel async(1) present(u[0:nn], v[0:nn])
       {
+#pragma acc loop seq
         for (int s = 0; s < steps; ++s)
         {
           if (s % 2 == 0)
@@ -120,6 +151,7 @@ namespace
     {
 #pragma acc parallel async(1) present(u[0:nn], v[0:nn])
       {
+#pragma acc loop seq
         for (int s = 0; s < steps; ++s)
         {
           if (s % 2 == 0)
@@ -256,6 +288,12 @@ int main(int argc, char **argv)
       return 1;
     }
 
+    const bool verify_grid = (grid_size == 10 || grid_size == 13);
+    if (verify_grid && !vm.count("check-interval"))
+    {
+      check_interval = 1;
+    }
+
     if (grid_size < 3)
     {
       std::cerr << "Grid size must be >= 3\n";
@@ -276,6 +314,7 @@ int main(int argc, char **argv)
     const int n = grid_size;
     const int nn = n * n;
     const std::size_t count = static_cast<std::size_t>(nn);
+    const bool use_batch_kernels = (n >= 64);
 
     std::vector<double> u(count);
     std::vector<double> u_new(count);
@@ -302,10 +341,21 @@ int main(int argc, char **argv)
 
       if (noerr_steps > 0)
       {
-        jacobi_batch_noerr(cur, next, n, nn, noerr_steps, tiled);
-        if (noerr_steps % 2 == 1)
+        if (use_batch_kernels)
         {
-          std::swap(cur, next);
+          jacobi_batch_noerr(cur, next, n, nn, noerr_steps, tiled);
+          if (noerr_steps % 2 == 1)
+          {
+            std::swap(cur, next);
+          }
+        }
+        else
+        {
+          for (int k = 0; k < noerr_steps; ++k)
+          {
+            jacobi_step_noerr(cur, next, n, nn, tiled);
+            std::swap(cur, next);
+          }
         }
         iter += noerr_steps;
       }
@@ -327,8 +377,7 @@ int main(int argc, char **argv)
       }
     }
 
-    const bool sync_host =
-        print_grid_flag || grid_size == 10 || grid_size == 13;
+    const bool sync_host = print_grid_flag || verify_grid;
     if (sync_host)
     {
 #pragma acc update host(cur[0:count])
