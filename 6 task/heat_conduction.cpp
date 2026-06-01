@@ -72,7 +72,7 @@ namespace
     }
   }
 
-  /** Many Jacobi steps in one GPU launch (cuts kernel launch overhead). */
+  /** Many Jacobi steps in one GPU launch (ping-pong u/v; no pointer swap on device). */
   void jacobi_batch_noerr(double *u, double *v, int n, int nn, int steps,
                           bool use_tiled)
   {
@@ -85,25 +85,34 @@ namespace
     {
 #pragma acc parallel async(1) present(u[0:nn], v[0:nn])
       {
-        double *cur = u;
-        double *nxt = v;
         for (int s = 0; s < steps; ++s)
         {
-#pragma acc loop tile(32, 32)
-          for (int row = 1; row < n - 1; ++row)
+          if (s % 2 == 0)
           {
-            for (int col = 1; col < n - 1; ++col)
+#pragma acc loop tile(32, 32)
+            for (int row = 1; row < n - 1; ++row)
             {
-              const std::size_t id = idx(row, col, n);
-              nxt[id] = 0.25 * (cur[idx(row, col + 1, n)] +
-                                cur[idx(row, col - 1, n)] +
-                                cur[idx(row - 1, col, n)] +
-                                cur[idx(row + 1, col, n)]);
+              for (int col = 1; col < n - 1; ++col)
+              {
+                const std::size_t id = idx(row, col, n);
+                v[id] = 0.25 * (u[idx(row, col + 1, n)] + u[idx(row, col - 1, n)] +
+                                u[idx(row - 1, col, n)] + u[idx(row + 1, col, n)]);
+              }
             }
           }
-          double *const tmp = cur;
-          cur = nxt;
-          nxt = tmp;
+          else
+          {
+#pragma acc loop tile(32, 32)
+            for (int row = 1; row < n - 1; ++row)
+            {
+              for (int col = 1; col < n - 1; ++col)
+              {
+                const std::size_t id = idx(row, col, n);
+                u[id] = 0.25 * (v[idx(row, col + 1, n)] + v[idx(row, col - 1, n)] +
+                                v[idx(row - 1, col, n)] + v[idx(row + 1, col, n)]);
+              }
+            }
+          }
         }
       }
     }
@@ -111,25 +120,34 @@ namespace
     {
 #pragma acc parallel async(1) present(u[0:nn], v[0:nn])
       {
-        double *cur = u;
-        double *nxt = v;
         for (int s = 0; s < steps; ++s)
         {
-#pragma acc loop collapse(2)
-          for (int row = 1; row < n - 1; ++row)
+          if (s % 2 == 0)
           {
-            for (int col = 1; col < n - 1; ++col)
+#pragma acc loop collapse(2)
+            for (int row = 1; row < n - 1; ++row)
             {
-              const std::size_t id = idx(row, col, n);
-              nxt[id] = 0.25 * (cur[idx(row, col + 1, n)] +
-                                cur[idx(row, col - 1, n)] +
-                                cur[idx(row - 1, col, n)] +
-                                cur[idx(row + 1, col, n)]);
+              for (int col = 1; col < n - 1; ++col)
+              {
+                const std::size_t id = idx(row, col, n);
+                v[id] = 0.25 * (u[idx(row, col + 1, n)] + u[idx(row, col - 1, n)] +
+                                u[idx(row - 1, col, n)] + u[idx(row + 1, col, n)]);
+              }
             }
           }
-          double *const tmp = cur;
-          cur = nxt;
-          nxt = tmp;
+          else
+          {
+#pragma acc loop collapse(2)
+            for (int row = 1; row < n - 1; ++row)
+            {
+              for (int col = 1; col < n - 1; ++col)
+              {
+                const std::size_t id = idx(row, col, n);
+                u[id] = 0.25 * (v[idx(row, col + 1, n)] + v[idx(row, col - 1, n)] +
+                                v[idx(row - 1, col, n)] + v[idx(row + 1, col, n)]);
+              }
+            }
+          }
         }
       }
     }
@@ -274,7 +292,7 @@ int main(int argc, char **argv)
 
 #pragma acc enter data copyin(cur[0:count], next[0:count])
 
-    while (iter < max_iters && error > eps)
+    for (iter = 0; iter < max_iters;)
     {
       const int next_check =
           ((iter / check_interval) + 1) * check_interval;
