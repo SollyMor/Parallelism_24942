@@ -70,9 +70,7 @@ namespace
     set_boundary(buf_b, m, n);
   }
 
-  /* Always present(buf_a, buf_b); cur/next are aliases (no pointer swap on host). */
-  double jacobi_step(double *buf_a, double *buf_b, double *cur, double *next,
-                     int m, int n)
+  double jacobi_step_a_to_b(double *buf_a, double *buf_b, int m, int n)
   {
     double error = 0.0;
     const int nn = m * n;
@@ -85,18 +83,40 @@ namespace
       {
         const std::size_t id = idx(j, i, m);
         const double new_val =
-            0.25 * (cur[idx(j, i + 1, m)] + cur[idx(j, i - 1, m)] +
-                    cur[idx(j - 1, i, m)] + cur[idx(j + 1, i, m)]);
-        next[id] = new_val;
-        error = std::fmax(error, std::fabs(new_val - cur[id]));
+            0.25 * (buf_a[idx(j, i + 1, m)] + buf_a[idx(j, i - 1, m)] +
+                    buf_a[idx(j - 1, i, m)] + buf_a[idx(j + 1, i, m)]);
+        buf_b[id] = new_val;
+        error = std::fmax(error, std::fabs(new_val - buf_a[id]));
       }
     }
 
     return error;
   }
 
-  void jacobi_step_no_error(double *buf_a, double *buf_b, double *cur,
-                            double *next, int m, int n)
+  double jacobi_step_b_to_a(double *buf_a, double *buf_b, int m, int n)
+  {
+    double error = 0.0;
+    const int nn = m * n;
+
+#pragma acc parallel loop collapse(2) present(buf_a[0:nn], buf_b[0:nn]) \
+    reduction(max : error)
+    for (int j = 1; j < n - 1; ++j)
+    {
+      for (int i = 1; i < m - 1; ++i)
+      {
+        const std::size_t id = idx(j, i, m);
+        const double new_val =
+            0.25 * (buf_b[idx(j, i + 1, m)] + buf_b[idx(j, i - 1, m)] +
+                    buf_b[idx(j - 1, i, m)] + buf_b[idx(j + 1, i, m)]);
+        buf_a[id] = new_val;
+        error = std::fmax(error, std::fabs(new_val - buf_b[id]));
+      }
+    }
+
+    return error;
+  }
+
+  void jacobi_step_no_error_a_to_b(double *buf_a, double *buf_b, int m, int n)
   {
     const int nn = m * n;
 
@@ -106,8 +126,24 @@ namespace
       for (int i = 1; i < m - 1; ++i)
       {
         const std::size_t id = idx(j, i, m);
-        next[id] = 0.25 * (cur[idx(j, i + 1, m)] + cur[idx(j, i - 1, m)] +
-                           cur[idx(j - 1, i, m)] + cur[idx(j + 1, i, m)]);
+        buf_b[id] = 0.25 * (buf_a[idx(j, i + 1, m)] + buf_a[idx(j, i - 1, m)] +
+                            buf_a[idx(j - 1, i, m)] + buf_a[idx(j + 1, i, m)]);
+      }
+    }
+  }
+
+  void jacobi_step_no_error_b_to_a(double *buf_a, double *buf_b, int m, int n)
+  {
+    const int nn = m * n;
+
+#pragma acc parallel loop collapse(2) present(buf_a[0:nn], buf_b[0:nn]) async(1)
+    for (int j = 1; j < n - 1; ++j)
+    {
+      for (int i = 1; i < m - 1; ++i)
+      {
+        const std::size_t id = idx(j, i, m);
+        buf_a[id] = 0.25 * (buf_b[idx(j, i + 1, m)] + buf_b[idx(j, i - 1, m)] +
+                            buf_b[idx(j - 1, i, m)] + buf_b[idx(j + 1, i, m)]);
       }
     }
   }
@@ -215,19 +251,27 @@ int main(int argc, char **argv)
 
     for (iter = 0; iter < max_iter; ++iter)
     {
-      double *cur = cur_is_a ? buf_a : buf_b;
-      double *next = cur_is_a ? buf_b : buf_a;
-
       const bool check_error = ((iter + 1) % error_check_period == 0) ||
                                (iter + 1 == max_iter);
       if (check_error)
       {
 #pragma acc wait(1)
-        error = jacobi_step(buf_a, buf_b, cur, next, m, n);
+        if (cur_is_a)
+        {
+          error = jacobi_step_a_to_b(buf_a, buf_b, m, n);
+        }
+        else
+        {
+          error = jacobi_step_b_to_a(buf_a, buf_b, m, n);
+        }
+      }
+      else if (cur_is_a)
+      {
+        jacobi_step_no_error_a_to_b(buf_a, buf_b, m, n);
       }
       else
       {
-        jacobi_step_no_error(buf_a, buf_b, cur, next, m, n);
+        jacobi_step_no_error_b_to_a(buf_a, buf_b, m, n);
       }
       cur_is_a = !cur_is_a;
 
